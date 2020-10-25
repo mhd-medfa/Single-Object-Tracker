@@ -1,4 +1,4 @@
-# SiamMask
+# SiamMask forked by Augmented Startups
 
 **NEW:** now including code for both training and inference!
 
