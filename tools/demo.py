@@ -4,13 +4,18 @@
 # Written by Qiang Wang (wangqiang2015 at ia.ac.cn)
 # --------------------------------------------------------
 import glob
-from tools.test import *
+from test import *
+import os,sys,inspect
+currentdir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
+parentdir = os.path.dirname(currentdir)
+sys.path.insert(0,parentdir)
+from experiments.siammask_sharp.custom import Custom
 
 parser = argparse.ArgumentParser(description='PyTorch Tracking Demo')
 
-parser.add_argument('--resume', default='', type=str, required=True,
+parser.add_argument('--resume', default='experiments/siammask_sharp/SiamMask_DAVIS.pth', type=str,
                     metavar='PATH',help='path to latest checkpoint (default: none)')
-parser.add_argument('--config', dest='config', default='config_davis.json',
+parser.add_argument('--config', dest='config', default='experiments/siammask_sharp/config_davis.json',
                     help='hyper-parameter of SiamMask in json format')
 parser.add_argument('--base_path', default='../../data/tennis', help='datasets')
 parser.add_argument('--cpu', action='store_true', help='cpu mode')
@@ -23,7 +28,6 @@ if __name__ == '__main__':
 
     # Setup Model
     cfg = load_config(args)
-    from custom import Custom
     siammask = Custom(anchors=cfg['anchors'])
     if args.resume:
         assert isfile(args.resume), 'Please download {} first.'.format(args.resume)

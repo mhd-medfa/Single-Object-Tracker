@@ -11,6 +11,10 @@ import cv2
 from PIL import Image
 from os import makedirs
 from os.path import join, isdir, isfile
+import os,sys,inspect
+currentdir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
+parentdir = os.path.dirname(currentdir)
+sys.path.insert(0,parentdir)
 
 from utils.log_helper import init_log, add_file_handler
 from utils.load_helper import load_pretrain
