@@ -41,7 +41,7 @@ This code has been tested on Ubuntu 16.04, Python 3.6, Pytorch 0.4.1, CUDA 9.2, 
 
 - Clone the repository 
 ```
-git clone https://github.com/foolwood/SiamMask.git && cd SiamMask
+git clone https://github.com/mhd-medfa/SiamMask.git && cd SiamMask
 export SiamMask=$PWD
 ```
 - Setup python environment
