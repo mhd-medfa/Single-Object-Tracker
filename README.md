@@ -71,6 +71,15 @@ cd $SiamMask/experiments/siammask_sharp
 export PYTHONPATH=$PWD:$PYTHONPATH
 python ../../tools/demo.py --resume SiamMask_DAVIS.pth --config config_davis.json
 ```
+Or
+
+- Run `realtime_demo.py`
+
+```shell
+cd $SiamMask/experiments/siammask_sharp
+export PYTHONPATH=$PWD:$PYTHONPATH
+python ../../tools/realtime_demo.py --resume SiamMask_DAVIS.pth --config config_davis.json
+```
 
 <div align="center">
   <img src="http://www.robots.ox.ac.uk/~qwang/SiamMask/img/SiamMask_demo.gif" width="500px" />
