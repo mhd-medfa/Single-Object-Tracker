@@ -46,9 +46,11 @@ export SiamMask=$PWD
 ```
 - Setup python environment
 ```
-conda create -n siammask python=3.6
+conda create -n siammask python=3.6 anaconda
 source activate siammask
-pip install -r requirements.txt
+conda install pytorch torchvision torchaudio cudatoolkit=10.2 -c pytorch
+pip3 install opencv-python
+pip3 install cython
 bash make.sh
 ```
 - Add the project to your PYTHONPATH
