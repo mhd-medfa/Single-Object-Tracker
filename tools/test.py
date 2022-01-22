@@ -173,7 +173,7 @@ def siamese_init(im, target_pos, target_sz, model, hp=None, device='cpu'):
     return state
 
 
-def siamese_track(state, im, mask_enable=False, refine_enable=False, device='cpu', debug=False):
+def siamese_track(state, im, sort_tracker, mask_enable=False, refine_enable=False, device='cpu', debug=False):
     p = state['p']
     net = state['net']
     avg_chans = state['avg_chans']
@@ -313,7 +313,26 @@ def siamese_track(state, im, mask_enable=False, refine_enable=False, device='cpu
 
     state['target_pos'] = target_pos
     state['target_sz'] = target_sz
+    if 'dets' not in state:
+        state['dets'] = np.array([[int(target_pos[0] - target_sz[0]/2), int(target_pos[1] - target_sz[1]/2.),
+                        int(target_pos[0] + target_sz[0]/2.), int(target_pos[1] + target_sz[1]/2.), score[best_pscore_id]]])
+    else:
+        det = np.array([[int(target_pos[0] - target_sz[0]/2), int(target_pos[1] - target_sz[1]/2.),
+                        int(target_pos[0] + target_sz[0]/2.), int(target_pos[1] + target_sz[1]/2.), score[best_pscore_id]]])
+        state['dets'] = np.append(state['dets'], det, axis=0)
+        if len(state['dets']) > 25:
+            state['dets'] = state['dets'][-25:]
+    
+    
     state['score'] = score[best_pscore_id]
+    # update SORT
+    # if state['score']
+    if 'dets' in state:
+        if len(state['dets'])>=25:
+            track_bbs_ids = sort_tracker.update(state['dets'])
+            state['track_bbs_ids'] = track_bbs_ids
+        else:
+            state['track_bbs_ids'] = np. array([])
     state['mask'] = mask_in_img if mask_enable else []
     state['ploygon'] = rbox_in_img if mask_enable else []
     return state

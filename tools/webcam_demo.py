@@ -10,6 +10,7 @@ currentdir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentfram
 parentdir = os.path.dirname(currentdir)
 sys.path.insert(0,parentdir)
 from experiments.siammask_sharp.custom import Custom
+from sort import *
 
 parser = argparse.ArgumentParser(description='PyTorch Tracking Demo')
 
@@ -26,6 +27,9 @@ if __name__ == '__main__':
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     torch.backends.cudnn.benchmark = True
 
+    #create instance of SORT
+    sort_tracker = Sort()
+    
     # Setup Model
     cfg = load_config(args)
     siammask = Custom(anchors=cfg['anchors'])
@@ -65,12 +69,20 @@ if __name__ == '__main__':
             target_sz = np.array([w, h])
             state = siamese_init(frame, target_pos, target_sz, siammask, cfg['hp'], device=device)  # init tracker
         elif f > 0:  # tracking
-            state = siamese_track(state, frame, mask_enable=True, refine_enable=True, device=device)  # track
+            state = siamese_track(state, frame, sort_tracker=sort_tracker, mask_enable=True, refine_enable=True, device=device)  # track
             location = state['ploygon'].flatten()
             mask = state['mask'] > state['p'].seg_thr
 
             frame[:, :, 2] = (mask > 0) * 255 + (mask == 0) * frame[:, :, 2]
             cv2.polylines(frame, [np.int0(location).reshape((-1, 1, 2))], True, (0, 255, 0), 3)
+            
+            if state['track_bbs_ids'].size>0:
+                x1 = int(state['track_bbs_ids'][-1][0])
+                y1 = int(state['track_bbs_ids'][-1][1])
+                x2 = int(state['track_bbs_ids'][-1][2])
+                y2 = int(state['track_bbs_ids'][-1][3])
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (255,0,0), 2)
+                
             cv2.imshow('SiamMask', frame)
             key = cv2.waitKey(1)
             if key > 0:
