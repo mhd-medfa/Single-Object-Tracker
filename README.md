@@ -70,7 +70,9 @@ wget http://www.robots.ox.ac.uk/~qwang/SiamMask_DAVIS.pth
 
 ```shell
 cd $SiamMask/experiments/siammask_sharp
-export PYTHONPATH=$PWD:$PYTHONPATH
+export PATH="/root/anaconda3/bin:$PATH"
+export PYTHONPATH="/root/anaconda3/envs/siammask/bin/python3.6"
+source activate siammask
 python ../../tools/demo.py --resume SiamMask_DAVIS.pth --config config_davis.json
 ```
 Or
@@ -79,7 +81,9 @@ Or
 
 ```shell
 cd $SiamMask/experiments/siammask_sharp
-export PYTHONPATH=$PWD:$PYTHONPATH
+export PATH="/root/anaconda3/bin:$PATH"
+export PYTHONPATH="/root/anaconda3/envs/siammask/bin/python3.6"
+source activate siammask
 python ../../tools/realtime_demo.py --resume SiamMask_DAVIS.pth --config config_davis.json
 ```
 

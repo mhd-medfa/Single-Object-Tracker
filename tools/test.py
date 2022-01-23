@@ -320,15 +320,15 @@ def siamese_track(state, im, sort_tracker, mask_enable=False, refine_enable=Fals
         det = np.array([[int(target_pos[0] - target_sz[0]/2), int(target_pos[1] - target_sz[1]/2.),
                         int(target_pos[0] + target_sz[0]/2.), int(target_pos[1] + target_sz[1]/2.), score[best_pscore_id]]])
         state['dets'] = np.append(state['dets'], det, axis=0)
-        if len(state['dets']) > 4:
-            state['dets'] = state['dets'][-4:]
+        if len(state['dets']) > 10:
+            state['dets'] = state['dets'][-10:]
     
     
     state['score'] = score[best_pscore_id]
     # update SORT
     # if state['score']
     if 'dets' in state:
-        if len(state['dets'])>=4:
+        if len(state['dets'])>=10:
             track_bbs_ids = sort_tracker.update(state['dets'])
             state['track_bbs_ids'] = track_bbs_ids
         else:
