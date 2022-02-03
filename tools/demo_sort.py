@@ -18,7 +18,7 @@ parser.add_argument('--resume', default='experiments/siammask_sharp/SiamMask_DAV
                     metavar='PATH',help='path to latest checkpoint (default: none)')
 parser.add_argument('--config', dest='config', default='experiments/siammask_sharp/config_davis.json',
                     help='hyper-parameter of SiamMask in json format')
-parser.add_argument('--base_path', default='../../data/tennis', help='datasets')
+parser.add_argument('--base_path', default='data/tennis', help='datasets')
 parser.add_argument('--cpu', action='store_true', help='cpu mode')
 args = parser.parse_args()
 

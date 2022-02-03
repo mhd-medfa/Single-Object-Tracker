@@ -173,7 +173,7 @@ def siamese_init(im, target_pos, target_sz, model, hp=None, device='cpu'):
     return state
 
 
-def siamese_track(state, im, sort_tracker, mask_enable=False, refine_enable=False, device='cpu', debug=False):
+def siamese_track(state, im, sort_tracker, mask_enable=False, refine_enable=False, device='cpu', debug=False, deep=False):
     p = state['p']
     net = state['net']
     avg_chans = state['avg_chans']
@@ -329,8 +329,14 @@ def siamese_track(state, im, sort_tracker, mask_enable=False, refine_enable=Fals
     # if state['score']
     if 'dets' in state:
         if len(state['dets'])>=10:
-            track_bbs_ids = sort_tracker.update(state['dets'])
-            state['track_bbs_ids'] = track_bbs_ids
+            xywhs = state['dets'][:, 0:4]
+            confs = state['dets'][:, 4]
+            clss = np.zeros_like(confs)
+            if deep:
+                track_bbs_ids = sort_tracker.update(xywhs, confs, clss, im)
+            else:
+                track_bbs_ids = sort_tracker.update(state['dets'])
+            state['track_bbs_ids'] = np.array(track_bbs_ids)
         else:
             state['track_bbs_ids'] = np. array([])
     state['mask'] = mask_in_img if mask_enable else []
