@@ -13,6 +13,7 @@ currentdir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentfram
 parentdir = os.path.dirname(currentdir)
 sys.path.insert(0,parentdir)
 from experiments.siammask_sharp.custom import Custom
+from sort import *
 
 parser = argparse.ArgumentParser(description='PyTorch Tracking Demo')
 
@@ -54,11 +55,31 @@ class Nodo(object):
         self.loop_rate.sleep()
         return self.image
 
+class KalmanFilter:
+    kf = cv2.KalmanFilter(4, 2)
+    kf.measurementMatrix = np.array([[1, 0, 0, 0], [0, 1, 0, 0]], np.float32)
+    kf.transitionMatrix = np.array([[1, 0, 1, 0], [0, 1, 0, 1], [0, 0, 1, 0], [0, 0, 0, 1]], np.float32)
+
+
+    def predict(self, coordX, coordY):
+        ''' This function estimates the position of the object'''
+        measured = np.array([[np.float32(coordX)], [np.float32(coordY)]])
+        self.kf.correct(measured)
+        predicted = self.kf.predict()
+        x, y = int(predicted[0]), int(predicted[1])
+        return x, y
+
 if __name__ == '__main__':
      # Setup device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     torch.backends.cudnn.benchmark = True
 
+    #create instance of SORT
+    sort_tracker = Sort()
+    
+    # Load Kalman filter to predict the trajectory
+    kf = KalmanFilter()
+    
     # Setup Model
     cfg = load_config(args)
     siammask = Custom(anchors=cfg['anchors'])
@@ -95,14 +116,24 @@ if __name__ == '__main__':
             target_sz = np.array([w, h])
             state = siamese_init(frame, target_pos, target_sz, siammask, cfg['hp'], device=device)  # init tracker
         elif f > 0:  # tracking
-            state = siamese_track(state, frame, mask_enable=True, refine_enable=True, device=device)  # track
+            state = siamese_track(state, frame, sort_tracker=sort_tracker, mask_enable=True, refine_enable=True, device=device)  # track
             location = state['ploygon'].flatten()
             mask = state['mask'] > state['p'].seg_thr
-
+            predicted = kf.predict(state['target_pos'][0], state['target_pos'][1])
+            #cv2.rectangle(frame, (x, y), (x2, y2), (255, 0, 0), 4)
+            cv2.circle(frame, (int(state['target_pos'][0]), int(state['target_pos'][1])), 20, (0, 0, 255), 4)
+            cv2.circle(frame, (int(predicted[0]), int(predicted[1])), 20, (255, 0, 0), 4)
+            
             frame[:, :, 2] = (mask > 0) * 255 + (mask == 0) * frame[:, :, 2]
             cv2.polylines(frame, [np.int0(location).reshape((-1, 1, 2))], True, (0, 255, 0), 3)
+            if state['track_bbs_ids'].size>0:
+                x1 = int(state['track_bbs_ids'][-1][0])
+                y1 = int(state['track_bbs_ids'][-1][1])
+                x2 = int(state['track_bbs_ids'][-1][2])
+                y2 = int(state['track_bbs_ids'][-1][3])
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (255,0,0), 2)
             cv2.imshow('SiamMask', frame)
-            key = cv2.waitKey(0)
+            key = cv2.waitKey(20)
             if key > 0:
                 break
 
@@ -111,4 +142,19 @@ if __name__ == '__main__':
     fps = f / toc
     print('SiamMask Time: {:02.1f}s Speed: {:3.1f}fps (with visulization!)'.format(toc, fps))
 
-        
+# rospy.init_node("siammaskimage", anonymous=True)
+# my_node = Nodo()
+# frame = my_node.frame_capture()
+
+# while not rospy.is_shutdown():
+#     print("capturing..")
+#     frame = my_node.frame_capture()
+#     cv2.imshow('SiamMask', frame)
+#     key = cv2.waitKey(50)
+#     print(key)
+#     if key > 0:
+#         print("done")
+#         break
+#     # k = cv2.waitKey(1) & 0xFF
+#     # if k == 27:
+#     #     break
