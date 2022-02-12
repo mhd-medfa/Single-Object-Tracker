@@ -69,7 +69,7 @@ class KalmanFilter:
         x, y = int(predicted[0]), int(predicted[1])
         return x, y
 
-if __name__ == '__main_':
+if __name__ == '__main__':
      # Setup device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     torch.backends.cudnn.benchmark = True
