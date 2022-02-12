@@ -31,7 +31,7 @@ class Nodo(object):
         self.image = None
         # self.br = CvBridge()
         # Node cycle rate (in Hz).
-        self.loop_rate = rospy.Rate(0.05)
+        self.loop_rate = rospy.Rate(0.3)
 
         # Publishers
         # self.pub = rospy.Publisher('imagetimer', Image,queue_size=10)
@@ -69,7 +69,7 @@ class KalmanFilter:
         x, y = int(predicted[0]), int(predicted[1])
         return x, y
 
-if __name__ == '__main__':
+if __name__ == '__main_':
      # Setup device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     torch.backends.cudnn.benchmark = True
@@ -133,7 +133,7 @@ if __name__ == '__main__':
                 y2 = int(state['track_bbs_ids'][-1][3])
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (255,0,0), 2)
             cv2.imshow('SiamMask', frame)
-            key = cv2.waitKey(20)
+            key = cv2.waitKey(1)
             if key > 0:
                 break
 
@@ -150,7 +150,7 @@ if __name__ == '__main__':
 #     print("capturing..")
 #     frame = my_node.frame_capture()
 #     cv2.imshow('SiamMask', frame)
-#     key = cv2.waitKey(50)
+#     key = cv2.waitKey(1)
 #     print(key)
 #     if key > 0:
 #         print("done")
