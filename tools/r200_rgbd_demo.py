@@ -1,6 +1,6 @@
 import rospy
-from sensor_msgs.msg import Image as ImageMsg
-# from cv_bridge import CvBridge
+from sensor_msgs.msg import CameraInfo, Image as ImageMsg
+import message_filters
 import cv2
 import os
 import numpy as np
@@ -29,7 +29,11 @@ class Nodo(object):
     def __init__(self):
         # Params
         self.image = None
-        # self.br = CvBridge()
+        self.undist_image = None
+        self.depth = None
+        self.camera_info_K = None
+        self.camera_info_D = None
+
         # Node cycle rate (in Hz).
         self.loop_rate = rospy.Rate(30)
 
@@ -37,23 +41,30 @@ class Nodo(object):
         # self.pub = rospy.Publisher('imagetimer', Image,queue_size=10)
 
         # Subscribers
-        rospy.Subscriber("/r200/rgb/image_raw",ImageMsg,self.callback)
+        rgb_sub = message_filters.Subscriber("/r200/rgb/image_raw",ImageMsg)
+        depth_sub = message_filters.Subscriber("/r200/depth/image_raw",ImageMsg)
+        camera_info_msg = rospy.wait_for_message("/r200/rgb/camera_info",CameraInfo)#, self.info_callback)
+        self.camera_info_K = np.array(camera_info_msg.K).reshape([3, 3])
+        self.camera_info_D = np.array(camera_info_msg.D)
+        ts = message_filters.TimeSynchronizer([rgb_sub, depth_sub], 60)#, 0.2,allow_headerless=False)
+        ts.registerCallback(self.callback)
 
-    def callback(self, msg):
-        # rospy.loginfo('Image received...')
-        self.image = ros_numpy.numpify(msg)#self.br.imgmsg_to_cv2(msg)
-
-
+    def callback(self, rgb_msg, depth_msg):
+        self.image = ros_numpy.numpify(rgb_msg)
+        self.undist_image = cv2.undistort(self.image, self.camera_info_K, self.camera_info_D)
+        self.depth = ros_numpy.numpify(depth_msg)
+    
     def frame_capture(self):
-        # rospy.loginfo("Timing images")
-        #rospy.spin()
-        # while not rospy.is_shutdown():
-        # rospy.loginfo('publishing image')
-        # #br = CvBridge()
-        # # if self.image is not None:
-        # #     self.pub.publish(br.cv2_to_imgmsg(self.image))
         self.loop_rate.sleep()
         return self.image
+
+    def undist_frame_capture(self):
+        self.loop_rate.sleep()
+        return self.undist_image
+
+    def depth_frame_capture(self):
+        self.loop_rate.sleep()
+        return self.depth
 
 class KalmanFilter:
     kf = cv2.KalmanFilter(4, 2)
@@ -68,6 +79,21 @@ class KalmanFilter:
         predicted = self.kf.predict()
         x, y = int(predicted[0]), int(predicted[1])
         return x, y
+def convert_2D_to_3D_coords(x_image, y_image, x0, y0, fx, fy, z_3D):
+    """
+    you can find the values of the camera intrinsic parameters at ./data/depth_Depth_metadata.csv
+    """
+    
+    camera_principle_point_x = x0
+    camera_principle_point_y = y0
+    camera_focal_length_x = fx
+    camera_focal_legnth_y = fy
+
+    # Formuals to calculate the x and y in 3D (As we studied Pinhole camera model in the lab )
+    x_3D = (x_image - camera_principle_point_x) * z_3D / camera_focal_length_x
+    y_3D = (y_image - camera_principle_point_y) * z_3D / camera_focal_legnth_y
+    
+    return x_3D, y_3D, z_3D
 
 if __name__ == '__main__':
      # Setup device
@@ -91,8 +117,9 @@ if __name__ == '__main__':
     
     rospy.init_node("siammaskimage", anonymous=True)
     my_node = Nodo()
-    frame = my_node.frame_capture()
-    
+    _ = my_node.frame_capture()
+    frame = my_node.undist_frame_capture()
+    depth_frame = my_node.depth_frame_capture()
     # Select ROI
     cv2.namedWindow("SiamMask", cv2.WND_PROP_FULLSCREEN)
     # cv2.setWindowProperty("SiamMask", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
@@ -100,16 +127,24 @@ if __name__ == '__main__':
         init_rect = cv2.selectROI('SiamMask', frame, False, False)
         x, y, w, h = init_rect
     except:
-        
+        print("Something wrong happened!")
         exit()
 
     toc = 0
     f = 0
+    camera_focal_length_x = my_node.camera_info_K[0,0] #fx
+    camera_focal_length_y = my_node.camera_info_K[1,1] #fy
+    camera_principle_point_x = my_node.camera_info_K[0,2] #x0
+    camera_principle_point_y = my_node.camera_info_K[1,2] #y0
     while not rospy.is_shutdown():
         tic = cv2.getTickCount()
         # Capture the video frame
         # by frame
-        frame = my_node.frame_capture()
+        _ = my_node.frame_capture()
+        frame = my_node.undist_frame_capture()
+        depth_frame = my_node.depth_frame_capture()
+        # cv2.imshow('undist_SiamMask', undist_frame)
+        # cv2.imshow('depth_SiamMask', depth_frame)
         if f == 0:  # init
             f=1
             target_pos = np.array([x + w / 2, y + h / 2])
@@ -123,6 +158,14 @@ if __name__ == '__main__':
             #cv2.rectangle(frame, (x, y), (x2, y2), (255, 0, 0), 4)
             cv2.circle(frame, (int(state['target_pos'][0]), int(state['target_pos'][1])), 20, (0, 0, 255), 4)
             cv2.circle(frame, (int(predicted[0]), int(predicted[1])), 20, (255, 0, 0), 4)
+            x_image = int(state['target_pos'][0])
+            y_image = int(state['target_pos'][1])
+            z_3D = depth_frame[y_image, x_image]
+            
+            x_3D, y_3D, z_3D = convert_2D_to_3D_coords(x_image=x_image, y_image=y_image, x0=camera_principle_point_x, y0=camera_principle_point_x,
+                                    fx=camera_focal_length_x, fy=camera_focal_length_y, z_3D=z_3D)
+            
+            print("X-target = {}, Y-target = {}, Z-target = {}".format(x_3D, y_3D, z_3D))
             
             frame[:, :, 2] = (mask > 0) * 255 + (mask == 0) * frame[:, :, 2]
             cv2.polylines(frame, [np.int0(location).reshape((-1, 1, 2))], True, (0, 255, 0), 3)
@@ -133,7 +176,7 @@ if __name__ == '__main__':
                 y2 = int(state['track_bbs_ids'][-1][3])
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (255,0,0), 2)
             cv2.imshow('SiamMask', frame)
-            key = cv2.waitKey(10)
+            key = cv2.waitKey(1)
             if key > 0:
                 break
 

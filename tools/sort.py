@@ -247,8 +247,8 @@ class Sort(object):
 
     # create and initialise new trackers for unmatched detections
     for i in unmatched_dets:
-        print(dets)
-        print(i)
+        # print(dets)
+        # print(i)
         trk = KalmanBoxTracker(dets[i,:])
         self.trackers.append(trk)
     i = len(self.trackers)
