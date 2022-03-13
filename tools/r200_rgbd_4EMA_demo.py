@@ -4,9 +4,8 @@ import message_filters
 import cv2
 import os
 import numpy as np
-# import ros_numpy
-from cv_bridge import CvBridge
-
+import ros_numpy
+import pandas as pd
 import glob
 from test import *
 import os,sys,inspect
@@ -34,8 +33,7 @@ class Nodo(object):
         self.depth = None
         self.camera_info_K = None
         self.camera_info_D = None
-        self.bridge = CvBridge()
-        
+
         # Node cycle rate (in Hz).
         self.loop_rate = rospy.Rate(30)
 
@@ -52,12 +50,9 @@ class Nodo(object):
         ts.registerCallback(self.callback)
 
     def callback(self, rgb_msg, depth_msg):
-        # self.image = ros_numpy.numpify(rgb_msg)
-        self.image = np.frombuffer(rgb_msg.data, dtype=np.uint8).reshape(rgb_msg.height, rgb_msg.width, -1)
+        self.image = ros_numpy.numpify(rgb_msg)
         self.undist_image = cv2.undistort(self.image, self.camera_info_K, self.camera_info_D)
-        # self.depth = ros_numpy.numpify(depth_msg)
-        self.depth = np.frombuffer(depth_msg.data, dtype=np.float32).reshape(depth_msg.height, depth_msg.width, -1)
-        
+        self.depth = ros_numpy.numpify(depth_msg)
     
     def frame_capture(self):
         self.loop_rate.sleep()
@@ -100,6 +95,14 @@ def convert_2D_to_3D_coords(x_image, y_image, x0, y0, fx, fy, z_3D):
     
     return x_3D, y_3D, z_3D
 
+def _4EMA(df):
+    # avg_gain=df.gain.ewm(span=12,min_periods=12,adjust=False).mean()
+    EMA9 = df.ewm(span=9,min_periods=9,adjust=False).mean()
+    EMA13 = df.ewm(span=13,min_periods=13,adjust=False).mean()
+    EMA21 = df.ewm(span=21,min_periods=21,adjust=False).mean()
+    EMA55 = df.ewm(span=55,min_periods=55,adjust=False).mean()
+    return EMA9, EMA13, EMA21, EMA55
+
 if __name__ == '__main__':
      # Setup device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -141,6 +144,7 @@ if __name__ == '__main__':
     camera_focal_length_y = my_node.camera_info_K[1,1] #fy
     camera_principle_point_x = my_node.camera_info_K[0,2] #x0
     camera_principle_point_y = my_node.camera_info_K[1,2] #y0
+    trajectory_df = pd.DataFrame()
     while not rospy.is_shutdown():
         tic = cv2.getTickCount()
         # Capture the video frame
@@ -152,9 +156,12 @@ if __name__ == '__main__':
         # cv2.imshow('depth_SiamMask', depth_frame)
         if f == 0:  # init
             f=1
-            target_pos = np.array([x + w / 2, y + h / 2])
+            target_pos = np.array([x + w / 2, y + h / 2], dtype=np.int)
             target_sz = np.array([w, h])
             state = siamese_init(frame, target_pos, target_sz, siammask, cfg['hp'], device=device)  # init tracker
+            traj_step = pd.Series(target_pos, index=["x", "y"])
+            trajectory_df = pd.concat([trajectory_df, traj_step.to_frame().T], ignore_index=True)
+        
         elif f > 0:  # tracking
             state = siamese_track(state, frame, sort_tracker=sort_tracker, mask_enable=True, refine_enable=True, device=device)  # track
             location = state['ploygon'].flatten()
@@ -165,11 +172,18 @@ if __name__ == '__main__':
             cv2.circle(frame, (int(predicted[0]), int(predicted[1])), 20, (255, 0, 0), 4)
             x_image = int(state['target_pos'][0])
             y_image = int(state['target_pos'][1])
-            z_3D = depth_frame[y_image, x_image][0]
+            z_3D = depth_frame[y_image, x_image]
+            
+            traj_step = pd.Series([x_image, y_image], index=["x", "y"])
+            trajectory_df = pd.concat([trajectory_df, traj_step.to_frame().T], ignore_index=True)
+            if len(trajectory_df)>=55:
+                EMA9, EMA13, EMA21, EMA55 = _4EMA(trajectory_df)
+            while len(trajectory_df) > 60:
+                n = 60 - len(trajectory_df)
+                trajectory_df.drop(trajectory_df.tail(n).index,inplace=True) # drop last n rows
             
             x_3D, y_3D, z_3D = convert_2D_to_3D_coords(x_image=x_image, y_image=y_image, x0=camera_principle_point_x, y0=camera_principle_point_x,
                                     fx=camera_focal_length_x, fy=camera_focal_length_y, z_3D=z_3D)
-            
             print("X-target = {}, Y-target = {}, Z-target = {}".format(x_3D, y_3D, z_3D))
             
             frame[:, :, 2] = (mask > 0) * 255 + (mask == 0) * frame[:, :, 2]

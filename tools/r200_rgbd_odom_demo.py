@@ -5,8 +5,9 @@ import cv2
 import os
 import numpy as np
 # import ros_numpy
-from cv_bridge import CvBridge
-
+import tf
+from nav_msgs.msg import Odometry
+from geometry_msgs.msg import Point, Pose, Quaternion, Twist, Vector3
 import glob
 from test import *
 import os,sys,inspect
@@ -34,10 +35,10 @@ class Nodo(object):
         self.depth = None
         self.camera_info_K = None
         self.camera_info_D = None
-        self.bridge = CvBridge()
-        
+
         # Node cycle rate (in Hz).
         self.loop_rate = rospy.Rate(30)
+        self.moving_object_odom_rate = rospy.Rate(1.0)
 
         # Publishers
         # self.pub = rospy.Publisher('imagetimer', Image,queue_size=10)
@@ -57,7 +58,6 @@ class Nodo(object):
         self.undist_image = cv2.undistort(self.image, self.camera_info_K, self.camera_info_D)
         # self.depth = ros_numpy.numpify(depth_msg)
         self.depth = np.frombuffer(depth_msg.data, dtype=np.float32).reshape(depth_msg.height, depth_msg.width, -1)
-        
     
     def frame_capture(self):
         self.loop_rate.sleep()
@@ -121,6 +121,11 @@ if __name__ == '__main__':
     siammask.eval().to(device)
     
     rospy.init_node("siammaskimage", anonymous=True)
+    # rospy.init_node('odometry_publisher')
+
+    odom_pub = rospy.Publisher("moving_object_odom", Odometry, queue_size=50)
+    odom_broadcaster = tf.TransformBroadcaster()
+    
     my_node = Nodo()
     _ = my_node.frame_capture()
     frame = my_node.undist_frame_capture()
@@ -141,7 +146,15 @@ if __name__ == '__main__':
     camera_focal_length_y = my_node.camera_info_K[1,1] #fy
     camera_principle_point_x = my_node.camera_info_K[0,2] #x0
     camera_principle_point_y = my_node.camera_info_K[1,2] #y0
+    
+    current_time = rospy.Time.now()
+    last_time = rospy.Time.now()
+
     while not rospy.is_shutdown():
+        current_time = rospy.Time.now()
+        # since all odometry is 6DOF we'll need a quaternion created from yaw
+        odom_quat = tf.transformations.quaternion_from_euler(0, 0, 0)
+        
         tic = cv2.getTickCount()
         # Capture the video frame
         # by frame
@@ -169,8 +182,38 @@ if __name__ == '__main__':
             
             x_3D, y_3D, z_3D = convert_2D_to_3D_coords(x_image=x_image, y_image=y_image, x0=camera_principle_point_x, y0=camera_principle_point_x,
                                     fx=camera_focal_length_x, fy=camera_focal_length_y, z_3D=z_3D)
-            
+            if f==1:
+                x_3D_old, y_3D_old, z_3D_old = x_3D, y_3D, z_3D
+            vx_3D, vy_3D, vz_3D = x_3D - x_3D_old, y_3D - y_3D_old, z_3D - z_3D_old
             print("X-target = {}, Y-target = {}, Z-target = {}".format(x_3D, y_3D, z_3D))
+            
+            # first, we'll publish the transform over tf
+            odom_broadcaster.sendTransform(
+                (x_3D, y_3D, z_3D),
+                odom_quat,
+                current_time,
+                "base_link",
+                "moving_object_odom"
+            )
+            
+            # next, we'll publish the odometry message over ROS
+            odom = Odometry()
+            odom.header.stamp = current_time
+            odom.header.frame_id = "moving_object_odom"
+
+            # set the position
+            odom.pose.pose = Pose(Point(x_3D, y_3D, z_3D), Quaternion(*odom_quat))
+
+            # set the velocity
+            odom.child_frame_id = "base_link"
+            odom.twist.twist = Twist(Vector3(vx_3D, vy_3D, vz_3D), Vector3(0, 0, 0))
+
+            # publish the message
+            odom_pub.publish(odom)
+
+            last_time = current_time
+            x_3D_old, y_3D_old, z_3D_old = x_3D, y_3D, z_3D
+            my_node.moving_object_odom_rate.sleep()
             
             frame[:, :, 2] = (mask > 0) * 255 + (mask == 0) * frame[:, :, 2]
             cv2.polylines(frame, [np.int0(location).reshape((-1, 1, 2))], True, (0, 255, 0), 3)
