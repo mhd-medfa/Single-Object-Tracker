@@ -19,6 +19,7 @@ from experiments.siammask_sharp.custom import Custom
 from sort import *
 from Bezier import Bezier
 from collections import deque
+from MiDaS import MiDaS
 
 parser = argparse.ArgumentParser(description='PyTorch Tracking Demo')
 
@@ -87,6 +88,28 @@ class KalmanFilter:
         predicted = self.kf.predict()
         x, y = int(predicted[0]), int(predicted[1])
         return x, y
+
+def mouseRGB(event,x,y,flags,param):
+    """https://stackoverflow.com/a/56788537/4051693
+
+    Args:
+        event (_type_): _description_
+        x (_type_): _description_
+        y (_type_): _description_
+        flags (_type_): _description_
+        param (_type_): _description_
+    """
+    if event == cv2.EVENT_LBUTTONDOWN: #checks mouse left button down condition
+        colorsB = frame[y,x,0]
+        colorsG = frame[y,x,1]
+        colorsR = frame[y,x,2]
+        colors = frame[y,x]
+        print("Red: ",colorsR)
+        print("Green: ",colorsG)
+        print("Blue: ",colorsB)
+        print("BRG Format: ",colors)
+        print("Coordinates of pixel: X: ",x,"Y: ",y)
+
 def convert_2D_to_3D_coords(x_image, y_image, x0, y0, fx, fy, z_3D):
     """
     you can find the values of the camera intrinsic parameters at ./data/depth_Depth_metadata.csv
@@ -114,6 +137,8 @@ if __name__ == '__main__':
     # Load Kalman filter to predict the trajectory
     kf = KalmanFilter()
     
+    # MiDaS
+    midas = MiDaS()
     # Setup Model
     cfg = load_config(args)
     siammask = Custom(anchors=cfg['anchors'])
@@ -133,11 +158,13 @@ if __name__ == '__main__':
     _ = my_node.frame_capture()
     frame = my_node.undist_frame_capture()
     depth_frame = my_node.depth_frame_capture()
+    relative_depth_frame = midas.estimate(frame)
+    
     # Select ROI
-    cv2.namedWindow("SiamMask", cv2.WND_PROP_FULLSCREEN)
+    cv2.namedWindow("Demo", cv2.WND_PROP_FULLSCREEN)
     # cv2.setWindowProperty("SiamMask", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
     try:
-        init_rect = cv2.selectROI('SiamMask', frame, False, False)
+        init_rect = cv2.selectROI('Demo', frame, False, False)
         x, y, w, h = init_rect
     except Exception as e:
         print(e)
@@ -167,8 +194,19 @@ if __name__ == '__main__':
         _ = my_node.frame_capture()
         frame = my_node.undist_frame_capture()
         depth_frame = my_node.depth_frame_capture()
+        relative_depth_frame = midas.estimate(frame)
         # cv2.imshow('undist_SiamMask', undist_frame)
         # cv2.imshow('depth_SiamMask', depth_frame)
+        cv2.imshow("relative_depth", relative_depth_frame)
+        cv2.imshow("depth", depth_frame)
+        
+        # depth_masked = np.ma.masked_where(depth_frame is not None, depth_frame)
+        # # depth_frame = depth_masked
+        # cv2.imshow("depth_masked", depth_masked)
+        # depth_ratio = np.sum(np.multiply(1.-depth_masked, 1.-relative_depth_frame)) / np.sum(1.-depth_masked)
+        # print("DePtH RaTi0 !$$$$$$$$$$$$$$$$$$$$$$$$:")
+        # print(depth_ratio)
+        
         if f == 0:  # init
             f=1
             target_pos = np.array([x + w / 2, y + h / 2])
@@ -240,7 +278,7 @@ if __name__ == '__main__':
                 x2 = int(state['track_bbs_ids'][-1][2])
                 y2 = int(state['track_bbs_ids'][-1][3])
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (255,0,0), 2)
-            cv2.imshow('SiamMask', frame)
+            cv2.imshow('Demo', frame)
             key = cv2.waitKey(1)
             if key > 0:
                 break
