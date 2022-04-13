@@ -20,6 +20,7 @@ from sort import *
 from Bezier import Bezier
 from collections import deque
 from MiDaS import MiDaS
+import copy
 
 parser = argparse.ArgumentParser(description='PyTorch Tracking Demo')
 
@@ -89,27 +90,6 @@ class KalmanFilter:
         x, y = int(predicted[0]), int(predicted[1])
         return x, y
 
-def mouseRGB(event,x,y,flags,param):
-    """https://stackoverflow.com/a/56788537/4051693
-
-    Args:
-        event (_type_): _description_
-        x (_type_): _description_
-        y (_type_): _description_
-        flags (_type_): _description_
-        param (_type_): _description_
-    """
-    if event == cv2.EVENT_LBUTTONDOWN: #checks mouse left button down condition
-        colorsB = frame[y,x,0]
-        colorsG = frame[y,x,1]
-        colorsR = frame[y,x,2]
-        colors = frame[y,x]
-        print("Red: ",colorsR)
-        print("Green: ",colorsG)
-        print("Blue: ",colorsB)
-        print("BRG Format: ",colors)
-        print("Coordinates of pixel: X: ",x,"Y: ",y)
-
 def convert_2D_to_3D_coords(x_image, y_image, x0, y0, fx, fy, z_3D):
     """
     you can find the values of the camera intrinsic parameters at ./data/depth_Depth_metadata.csv
@@ -125,6 +105,7 @@ def convert_2D_to_3D_coords(x_image, y_image, x0, y0, fx, fy, z_3D):
     y_3D = (y_image - camera_principle_point_y) * z_3D / camera_focal_legnth_y
     
     return x_3D, y_3D, z_3D
+
 
 if __name__ == '__main__':
      # Setup device
@@ -158,7 +139,7 @@ if __name__ == '__main__':
     _ = my_node.frame_capture()
     frame = my_node.undist_frame_capture()
     depth_frame = my_node.depth_frame_capture()
-    relative_depth_frame = midas.estimate(frame)
+    relative_depth_frame_colored = midas.estimate(frame)
     
     # Select ROI
     cv2.namedWindow("Demo", cv2.WND_PROP_FULLSCREEN)
@@ -183,6 +164,12 @@ if __name__ == '__main__':
     position_queue = deque(maxlen=6)
     velocity_queue = deque(maxlen=6)
     t_points = np.arange(0, 1, 0.01)
+    # depth_hybrid = np.zeros_like(depth_frame)
+    # create an inverse from the colormap to gray values
+    gray_values = np.arange(256, dtype=np.uint8)
+    color_values = map(tuple, cv2.applyColorMap(gray_values, cv2.COLORMAP_HOT).reshape(256, 3))
+    color_to_gray_map = dict(zip(color_values, gray_values))
+    s=True
     while not rospy.is_shutdown():
         current_time = rospy.Time.now()
         # since all odometry is 6DOF we'll need a quaternion created from yaw
@@ -194,24 +181,54 @@ if __name__ == '__main__':
         _ = my_node.frame_capture()
         frame = my_node.undist_frame_capture()
         depth_frame = my_node.depth_frame_capture()
-        relative_depth_frame = midas.estimate(frame)
+        relative_depth_frame, magma_relative_depth_map = midas.estimate(frame)
+        # relative_depth_frame = cv2.cvtColor(relative_depth_frame_colored, cv2.COLOR_RGB2GRAY)
+        # relative_depth_frame.reshape(relative_depth_frame.shape[0], relative_depth_frame.shape[1], 1)
+        relative_depth_frame = relative_depth_frame[..., np.newaxis].astype(np.float)
         # cv2.imshow('undist_SiamMask', undist_frame)
         # cv2.imshow('depth_SiamMask', depth_frame)
-        cv2.imshow("relative_depth", relative_depth_frame)
-        cv2.imshow("depth", depth_frame)
+        # cv2.imshow("relative_depth_frame_colored", relative_depth_frame_colored)
         
-        # depth_masked = np.ma.masked_where(depth_frame is not None, depth_frame)
-        # # depth_frame = depth_masked
-        # cv2.imshow("depth_masked", depth_masked)
-        # depth_ratio = np.sum(np.multiply(1.-depth_masked, 1.-relative_depth_frame)) / np.sum(1.-depth_masked)
-        # print("DePtH RaTi0 !$$$$$$$$$$$$$$$$$$$$$$$$:")
-        # print(depth_ratio)
+        
+        depth_masked = copy.deepcopy(depth_frame)
+        depth_masked[np.isnan(depth_masked)] = 0
+        inversed_relative_depth_frame = (1. - relative_depth_frame)
+        normalized_inversed_relative_depth_frame = (inversed_relative_depth_frame - np.min(inversed_relative_depth_frame))/(np.max(inversed_relative_depth_frame)-np.min(inversed_relative_depth_frame))
+        depth_ratio_array = depth_masked / (normalized_inversed_relative_depth_frame+1e-5)
+        depth_ratio = depth_ratio_array[np.nonzero(depth_ratio_array)].mean()
+        depth_ratio_std = depth_ratio_array[np.nonzero(depth_ratio_array)].std()
+        print("DePtH RaTi0 !$$$$$$$$$$$$$$$$$$$$$$$$:")
+        print(depth_ratio)
+        print("$$$$$$$$Td:")
+        print(depth_ratio_std)
+        # depth_frame = copy.deepcopy(relative_depth_frame)
+        # depth_temp = copy.deepcopy(depth_frame)
+        # depth_temp = depth_frame
+        # depth_temp = np.where(np.isnan(depth_temp), inversed_relative_depth_frame*depth_ratio, depth_temp)
+        depth_temp = normalized_inversed_relative_depth_frame*depth_ratio
+        depth_hybrid = depth_temp
+        cv2.imshow("depth", depth_frame)
+        depth_frame = depth_hybrid
+        
+        cv2.imshow("relative_depth", magma_relative_depth_map)
+        cv2.imshow("test", (255*relative_depth_frame).astype(np.uint8))
+        cv2.imshow("depth_hybrid", depth_hybrid)
+        # import pandas as pd 
+        # if s == True:
+        #     s=False
+        #     pd.DataFrame(np.squeeze(depth_masked)).to_csv("file.csv")
+        #     pd.DataFrame(np.squeeze(relative_depth_frame)).to_csv("file2.csv")
+            
+        # cv2.waitKey(0)
         
         if f == 0:  # init
             f=1
             target_pos = np.array([x + w / 2, y + h / 2])
             target_sz = np.array([w, h])
             state = siamese_init(frame, target_pos, target_sz, siammask, cfg['hp'], device=device)  # init tracker
+            print(depth_frame)
+            print("relative depth")
+            print( relative_depth_frame)
         elif f > 0:  # tracking
             state = siamese_track(state, frame, sort_tracker=sort_tracker, mask_enable=True, refine_enable=True, device=device)  # track
             if state['score'] < 0.65:

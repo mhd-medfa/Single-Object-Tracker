@@ -30,7 +30,7 @@ class MiDaS:
             self.transform = self.midas_transforms.small_transform
 
     def estimate(self, img) -> np.ndarray:
-        self.img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        self.img = img #cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
         # Apply input transforms
         input_batch = self.transform(self.img).to(self.device)
@@ -52,15 +52,7 @@ class MiDaS:
 
         self.img = cv2.cvtColor(self.img, cv2.COLOR_RGB2BGR)
 
-        depth_map = (depth_map*255).astype(np.uint8)
-        depth_map = cv2.applyColorMap(depth_map , cv2.COLORMAP_MAGMA)
-
-        # cv2.imshow('Image', img)
-        # cv2.imshow('Depth Map', depth_map)
-
-        # if cv2.waitKey(5) & 0xFF == 27:
-        #     break
-
-        # # cap.release()
-        # cv2.destroyAllWindows
-        return depth_map
+        # depth_map = (depth_map*255).astype(np.uint8)
+        magma_depth_map = cv2.applyColorMap((depth_map*255).astype(np.uint8) , cv2.COLORMAP_MAGMA)
+        
+        return depth_map, magma_depth_map
