@@ -193,8 +193,14 @@ if __name__ == '__main__':
         depth_masked = copy.deepcopy(depth_frame)
         depth_masked[np.isnan(depth_masked)] = 0
         inversed_relative_depth_frame = (1. - relative_depth_frame)
-        normalized_inversed_relative_depth_frame = (inversed_relative_depth_frame - np.min(inversed_relative_depth_frame))/(np.max(inversed_relative_depth_frame)-np.min(inversed_relative_depth_frame))
-        depth_ratio_array = depth_masked / (normalized_inversed_relative_depth_frame+1e-5)
+        # standarized_inversed_relative_depth_frame = (inversed_relative_depth_frame - inversed_relative_depth_frame.mean())/inversed_relative_depth_frame.std()
+        # normalized_standarized_inversed_relative_depth_frame = (standarized_inversed_relative_depth_frame - np.min(standarized_inversed_relative_depth_frame))/(np.max(standarized_inversed_relative_depth_frame)-np.min(standarized_inversed_relative_depth_frame))
+        # normalized_inversed_relative_depth_frame = (inversed_relative_depth_frame - np.min(inversed_relative_depth_frame))/(np.max(inversed_relative_depth_frame)-np.min(inversed_relative_depth_frame))
+        standarized_inversed_relative_depth_frame = (inversed_relative_depth_frame - inversed_relative_depth_frame.min())/inversed_relative_depth_frame.std()
+        unit_vector_inversed_relative_depth_frame = standarized_inversed_relative_depth_frame / np.linalg.norm(standarized_inversed_relative_depth_frame.squeeze(), 1)
+        # unit_vector_inversed_relative_depth_frame = (10*unit_vector_inversed_relative_depth_frame).astype(np.uint8)
+        # normalized_inversed_relative_depth_frame = (unit_vector_inversed_relative_depth_frame - np.min(unit_vector_inversed_relative_depth_frame))/(np.max(unit_vector_inversed_relative_depth_frame)-np.min(unit_vector_inversed_relative_depth_frame))
+        depth_ratio_array = depth_masked / (unit_vector_inversed_relative_depth_frame+1e-5)
         depth_ratio = depth_ratio_array[np.nonzero(depth_ratio_array)].mean()
         depth_ratio_std = depth_ratio_array[np.nonzero(depth_ratio_array)].std()
         print("DePtH RaTi0 !$$$$$$$$$$$$$$$$$$$$$$$$:")
@@ -205,14 +211,16 @@ if __name__ == '__main__':
         # depth_temp = copy.deepcopy(depth_frame)
         # depth_temp = depth_frame
         # depth_temp = np.where(np.isnan(depth_temp), inversed_relative_depth_frame*depth_ratio, depth_temp)
-        depth_temp = normalized_inversed_relative_depth_frame*depth_ratio
+        depth_temp = unit_vector_inversed_relative_depth_frame*depth_ratio
         depth_hybrid = depth_temp
         cv2.imshow("depth", depth_frame)
         depth_frame = depth_hybrid
         
         cv2.imshow("relative_depth", magma_relative_depth_map)
         cv2.imshow("test", (255*relative_depth_frame).astype(np.uint8))
-        cv2.imshow("depth_hybrid", depth_hybrid)
+        mxx = np.max(depth_hybrid.squeeze())
+        print(mxx)
+        cv2.imshow("depth_hybrid", (255/mxx*depth_hybrid).astype(np.uint8))
         # import pandas as pd 
         # if s == True:
         #     s=False
