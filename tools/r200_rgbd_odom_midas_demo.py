@@ -90,6 +90,30 @@ class KalmanFilter:
         x, y = int(predicted[0]), int(predicted[1])
         return x, y
 
+class KalmanFilterEstimator:
+    # Parameters Initialization
+    def __init__(self, sensor_mean, sensor_variance, sensor_reading) -> None:
+        self.mu_xi, self.var_xi = 0.0, 6400 # mean and variance of the model
+        self.mu_eta, self.var_eta = sensor_mean, sensor_variance # mean and variance of the sensor
+        self.x_opt = 0.0  # optimal filtered values
+        self.e = 0.0 # mean of the square errors
+        self.K = 0.0 # Kalman coefficient's value over time
+
+        # base of the iteration
+        self.x_opt = 0.0
+        self.e = self.var_eta
+        self.base_iteration = True
+        
+    def step(self, sensor_reading):
+        z = sensor_reading # sensor readings
+        if self.base_iteration:
+            self.base_iteration = False
+            self.x_opt = z
+        self.e = self.var_eta*(self.e+self.var_xi)/(self.e+self.var_xi+self.var_eta)
+        self.K = self.e/self.var_eta
+        self.x_opt = self.K*z + (1-self.K)*(self.x_opt)
+        return self.x_opt
+
 def convert_2D_to_3D_coords(x_image, y_image, x0, y0, fx, fy, z_3D):
     """
     you can find the values of the camera intrinsic parameters at ./data/depth_Depth_metadata.csv
@@ -196,7 +220,9 @@ if __name__ == '__main__':
         # standarized_inversed_relative_depth_frame = (inversed_relative_depth_frame - inversed_relative_depth_frame.mean())/inversed_relative_depth_frame.std()
         # normalized_standarized_inversed_relative_depth_frame = (standarized_inversed_relative_depth_frame - np.min(standarized_inversed_relative_depth_frame))/(np.max(standarized_inversed_relative_depth_frame)-np.min(standarized_inversed_relative_depth_frame))
         # normalized_inversed_relative_depth_frame = (inversed_relative_depth_frame - np.min(inversed_relative_depth_frame))/(np.max(inversed_relative_depth_frame)-np.min(inversed_relative_depth_frame))
-        standarized_inversed_relative_depth_frame = (inversed_relative_depth_frame - inversed_relative_depth_frame.min())/inversed_relative_depth_frame.std()
+        inversed_relative_depth_frame_std = inversed_relative_depth_frame.std()
+        inversed_relative_depth_frame_mean = inversed_relative_depth_frame.mean()
+        standarized_inversed_relative_depth_frame = (inversed_relative_depth_frame - inversed_relative_depth_frame.min())/inversed_relative_depth_frame_std
         unit_vector_inversed_relative_depth_frame = standarized_inversed_relative_depth_frame / np.linalg.norm(standarized_inversed_relative_depth_frame.squeeze(), 1)
         # unit_vector_inversed_relative_depth_frame = (10*unit_vector_inversed_relative_depth_frame).astype(np.uint8)
         # normalized_inversed_relative_depth_frame = (unit_vector_inversed_relative_depth_frame - np.min(unit_vector_inversed_relative_depth_frame))/(np.max(unit_vector_inversed_relative_depth_frame)-np.min(unit_vector_inversed_relative_depth_frame))
@@ -233,12 +259,17 @@ if __name__ == '__main__':
             f=1
             target_pos = np.array([x + w / 2, y + h / 2])
             target_sz = np.array([w, h])
-            state = siamese_init(frame, target_pos, target_sz, siammask, cfg['hp'], device=device)  # init tracker
+            x_image = int(target_pos[0])
+            y_image = int(target_pos[1])
+            z_3D = depth_frame[y_image, x_image][0]
+            kf_estimator = KalmanFilterEstimator(inversed_relative_depth_frame_mean, inversed_relative_depth_frame_std**2, z_3D)
+            target_depth = z_3D = kf_estimator.step(z_3D)
+            state = siamese_init(frame, target_pos, target_sz, target_depth, siammask, cfg['hp'], device=device)  # init tracker
             print(depth_frame)
             print("relative depth")
-            print( relative_depth_frame)
+            print(relative_depth_frame)
         elif f > 0:  # tracking
-            state = siamese_track(state, frame, sort_tracker=sort_tracker, mask_enable=True, refine_enable=True, device=device)  # track
+            state = siamese_track(state, frame, depth_frame, siammask, cfg, sort_tracker=sort_tracker, mask_enable=True, refine_enable=True, reset_template=True, device=device)  # track
             if state['score'] < 0.65:
                 pass #here should call panoptic segmentation on the latest good frame with high score
             elif state['score'] >= 0.65:
@@ -254,7 +285,7 @@ if __name__ == '__main__':
             x_image = int(state['target_pos'][0])
             y_image = int(state['target_pos'][1])
             z_3D = depth_frame[y_image, x_image][0]
-            
+            z_3D = kf_estimator.step(z_3D)
             x_3D, y_3D, z_3D = convert_2D_to_3D_coords(x_image=x_image, y_image=y_image, x0=camera_principle_point_x, y0=camera_principle_point_x,
                                     fx=camera_focal_length_x, fy=camera_focal_length_y, z_3D=z_3D)
             position_queue.append([z_3D, x_3D, y_3D])

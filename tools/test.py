@@ -9,6 +9,7 @@ import logging
 import numpy as np
 import cv2
 from PIL import Image
+from collections import deque
 from os import makedirs
 from os.path import join, isdir, isfile
 import os,sys,inspect
@@ -32,6 +33,7 @@ from utils.config_helper import load_config
 from utils.pyvotkit.region import vot_overlap, vot_float2str
 
 thrs = np.arange(0.3, 0.5, 0.05)
+high_score_frames = deque(maxlen=4)
 
 parser = argparse.ArgumentParser(description='Test SiamMask')
 parser.add_argument('--arch', dest='arch', default='', choices=['Custom',],
@@ -133,7 +135,7 @@ def generate_anchor(cfg, score_size):
     return anchor
 
 
-def siamese_init(im, target_pos, target_sz, model, hp=None, device='cpu'):
+def siamese_init(im, target_pos, target_sz, target_depth, model, hp=None, device='cpu'):
     state = dict()
     state['im_h'] = im.shape[0]
     state['im_w'] = im.shape[1]
@@ -170,10 +172,12 @@ def siamese_init(im, target_pos, target_sz, model, hp=None, device='cpu'):
     state['window'] = window
     state['target_pos'] = target_pos
     state['target_sz'] = target_sz
+    state['target_depth'] = target_depth
+    high_score_frames.append([im, state])
     return state
 
 
-def siamese_track(state, im, sort_tracker, mask_enable=False, refine_enable=False, device='cpu', debug=False, deep=False):
+def siamese_track(state, im, depth_im, siammask, cfg, sort_tracker, mask_enable=False, refine_enable=False, reset_template=False, device='cpu', debug=False, deep=False):
     p = state['p']
     net = state['net']
     avg_chans = state['avg_chans']
@@ -313,6 +317,9 @@ def siamese_track(state, im, sort_tracker, mask_enable=False, refine_enable=Fals
 
     state['target_pos'] = target_pos
     state['target_sz'] = target_sz
+    x_image = int(state['target_pos'][0])
+    y_image = int(state['target_pos'][1])
+    state['target_depth'] = z_3D = depth_im[y_image, x_image][0]
     if 'dets' not in state:
         state['dets'] = np.array([[int(target_pos[0] - target_sz[0]/2), int(target_pos[1] - target_sz[1]/2.),
                         int(target_pos[0] + target_sz[0]/2.), int(target_pos[1] + target_sz[1]/2.), score[best_pscore_id]]])
@@ -341,6 +348,18 @@ def siamese_track(state, im, sort_tracker, mask_enable=False, refine_enable=Fals
             state['track_bbs_ids'] = np. array([])
     state['mask'] = mask_in_img if mask_enable else []
     state['ploygon'] = rbox_in_img if mask_enable else []
+    high_score_frames.append([im, state])
+    if state['score'] < 0.4 and reset_template:
+        print("~~~~~~~~~~~~Score of current template~~~~~~~~~~~")
+        print(state['score'])
+        best_frame = sorted(list(high_score_frames), key = lambda x: abs(x[1]['target_depth']-state['target_depth']))[0]
+        new_template_frame, new_template_state = best_frame
+        init_state = siamese_init(new_template_frame, new_template_state['target_pos'], new_template_state['target_sz'], new_template_state['target_depth'], siammask, cfg['hp'], device=device)  # init tracker
+        state = siamese_track(init_state, im, depth_im, siammask, cfg, sort_tracker=sort_tracker, mask_enable=True, refine_enable=True, reset_template = False, device=device)  # track
+        print("~~~~~~~~~~~~~using best old frame as a template~~~~~~~~~~~~~")
+        print('new score:')
+        print(state['score'])
+        return state
     return state
 
 
