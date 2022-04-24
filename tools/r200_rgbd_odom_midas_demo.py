@@ -160,10 +160,14 @@ if __name__ == '__main__':
     odom_broadcaster = tf.TransformBroadcaster()
     
     my_node = Nodo()
-    _ = my_node.frame_capture()
-    frame = my_node.undist_frame_capture()
-    depth_frame = my_node.depth_frame_capture()
-    relative_depth_frame_colored = midas.estimate(frame)
+    original_frame = None
+    while original_frame is None:
+        _ = my_node.frame_capture()
+        original_frame = my_node.undist_frame_capture()
+        depth_frame = my_node.depth_frame_capture()
+        print("frame still loading")
+    relative_depth_frame_colored = midas.estimate(original_frame)
+    frame = copy.deepcopy(original_frame)
     
     # Select ROI
     cv2.namedWindow("Demo", cv2.WND_PROP_FULLSCREEN)
@@ -203,9 +207,10 @@ if __name__ == '__main__':
         # Capture the video frame
         # by frame
         _ = my_node.frame_capture()
-        frame = my_node.undist_frame_capture()
+        original_frame = my_node.undist_frame_capture()
         depth_frame = my_node.depth_frame_capture()
-        relative_depth_frame, magma_relative_depth_map = midas.estimate(frame)
+        relative_depth_frame, magma_relative_depth_map = midas.estimate(original_frame)
+        frame = copy.deepcopy(original_frame)
         # relative_depth_frame = cv2.cvtColor(relative_depth_frame_colored, cv2.COLOR_RGB2GRAY)
         # relative_depth_frame.reshape(relative_depth_frame.shape[0], relative_depth_frame.shape[1], 1)
         relative_depth_frame = relative_depth_frame[..., np.newaxis].astype(np.float)
@@ -237,15 +242,22 @@ if __name__ == '__main__':
         # depth_temp = copy.deepcopy(depth_frame)
         # depth_temp = depth_frame
         # depth_temp = np.where(np.isnan(depth_temp), inversed_relative_depth_frame*depth_ratio, depth_temp)
-        depth_temp = unit_vector_inversed_relative_depth_frame*depth_ratio
-        depth_hybrid = depth_temp
+        depth_hybrid = unit_vector_inversed_relative_depth_frame*depth_ratio
+        # depth_hybrid = depth_temp
         cv2.imshow("depth", depth_frame)
-        depth_frame = depth_hybrid
+        # depth_frame = depth_hybrid
         
         cv2.imshow("relative_depth", magma_relative_depth_map)
         cv2.imshow("test", (255*relative_depth_frame).astype(np.uint8))
         mxx = np.max(depth_hybrid.squeeze())
+        print("max val in dpeth_hyprid:")
         print(mxx)
+        mxx2 = np.max(depth_frame.squeeze())
+        print("max val in dpeth_frame:")
+        print(mxx2)
+        mxx3 = np.max(depth_masked.squeeze())
+        print("max val in dpeth_masked:")
+        print(mxx3)
         cv2.imshow("depth_hybrid", (255/mxx*depth_hybrid).astype(np.uint8))
         # import pandas as pd 
         # if s == True:
@@ -261,19 +273,19 @@ if __name__ == '__main__':
             target_sz = np.array([w, h])
             x_image = int(target_pos[0])
             y_image = int(target_pos[1])
-            z_3D = depth_frame[y_image, x_image][0]
+            z_3D = depth_hybrid[y_image, x_image][0]
             kf_estimator = KalmanFilterEstimator(inversed_relative_depth_frame_mean, inversed_relative_depth_frame_std**2, z_3D)
             target_depth = z_3D = kf_estimator.step(z_3D)
-            state = siamese_init(frame, target_pos, target_sz, target_depth, siammask, cfg['hp'], device=device)  # init tracker
-            print(depth_frame)
+            state = siamese_init(original_frame, target_pos, target_sz, target_depth, siammask, cfg['hp'], device=device)  # init tracker
+            print(depth_hybrid)
             print("relative depth")
             print(relative_depth_frame)
         elif f > 0:  # tracking
-            state = siamese_track(state, frame, depth_frame, siammask, cfg, sort_tracker=sort_tracker, mask_enable=True, refine_enable=True, reset_template=True, device=device)  # track
+            state = siamese_track(state, original_frame, depth_hybrid, siammask, cfg, sort_tracker=sort_tracker, mask_enable=True, refine_enable=True, reset_template=True, device=device)  # track
             if state['score'] < 0.65:
                 pass #here should call panoptic segmentation on the latest good frame with high score
             elif state['score'] >= 0.65:
-                high_score_frame = frame
+                high_score_frame = original_frame
             else:
                 print("Check state's score value")
             location = state['ploygon'].flatten()
@@ -284,7 +296,7 @@ if __name__ == '__main__':
             cv2.circle(frame, (int(predicted[0]), int(predicted[1])), 20, (255, 0, 0), 4)
             x_image = int(state['target_pos'][0])
             y_image = int(state['target_pos'][1])
-            z_3D = depth_frame[y_image, x_image][0]
+            z_3D = depth_hybrid[y_image, x_image][0]
             z_3D = kf_estimator.step(z_3D)
             x_3D, y_3D, z_3D = convert_2D_to_3D_coords(x_image=x_image, y_image=y_image, x0=camera_principle_point_x, y0=camera_principle_point_x,
                                     fx=camera_focal_length_x, fy=camera_focal_length_y, z_3D=z_3D)
@@ -300,8 +312,9 @@ if __name__ == '__main__':
                 (z_3D, y_3D, x_3D),
                 odom_quat,
                 current_time,
-                "base_link",
-                "moving_object_odom"
+                "moving_object_odom",
+                "map"
+                
             )
             
             # next, we'll publish the odometry message over ROS
@@ -316,7 +329,7 @@ if __name__ == '__main__':
                 odom.pose.pose = Pose(Point(*pos), Quaternion(*odom_quat))
 
                 # set the velocity
-                odom.child_frame_id = "base_link"
+                odom.child_frame_id = "moving_object_odom"
                 odom.twist.twist = Twist(Vector3(*vel), Vector3(0, 0, 0))
 
                 # publish the message
@@ -338,6 +351,7 @@ if __name__ == '__main__':
             key = cv2.waitKey(1)
             if key > 0:
                 break
+            f+=1
 
         toc += cv2.getTickCount() - tic
     toc /= cv2.getTickFrequency()
