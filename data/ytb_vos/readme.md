@@ -3,7 +3,17 @@
 ### Download raw images and annotations ([website](https://youtube-vos.org/dataset/download), 8.3G)
 
 ````shell
+pip install gdown
 python download_from_gdrive.py https://drive.google.com/uc?id=18S_db1cFgSD1RsMsofJLkd6SyR9opk6a --output train.zip
+unzip ./train.zip
+python parse_ytb_vos.py  # really slow
+````
+Or
+
+
+````shell
+pip install gdown
+gdown https://drive.google.com/uc?id=18S_db1cFgSD1RsMsofJLkd6SyR9opk6a
 unzip ./train.zip
 python parse_ytb_vos.py  # really slow
 ````
