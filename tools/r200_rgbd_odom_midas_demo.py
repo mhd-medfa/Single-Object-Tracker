@@ -21,6 +21,7 @@ from Bezier import Bezier
 from collections import deque
 from MiDaS import MiDaS
 import copy
+import pyrealsense2
 
 parser = argparse.ArgumentParser(description='PyTorch Tracking Demo')
 
@@ -31,7 +32,7 @@ parser.add_argument('--config', dest='config', default='experiments/siammask_sha
 parser.add_argument('--base_path', default='../../data/tennis', help='datasets')
 parser.add_argument('--cpu', action='store_true', help='cpu mode')
 args = parser.parse_args()
-
+sampling_rate = 30
 class Nodo(object):
     def __init__(self):
         # Params
@@ -42,8 +43,8 @@ class Nodo(object):
         self.camera_info_D = None
 
         # Node cycle rate (in Hz).
-        self.loop_rate = rospy.Rate(30)
-        self.moving_object_odom_rate = rospy.Rate(30.0)
+        self.loop_rate = rospy.Rate(sampling_rate)
+        self.moving_object_odom_rate = rospy.Rate(20)
 
         # Publishers
         # self.pub = rospy.Publisher('imagetimer', Image,queue_size=10)
@@ -52,6 +53,18 @@ class Nodo(object):
         rgb_sub = message_filters.Subscriber("/r200/rgb/image_raw",ImageMsg)
         depth_sub = message_filters.Subscriber("/r200/depth/image_raw",ImageMsg)
         camera_info_msg = rospy.wait_for_message("/r200/rgb/camera_info",CameraInfo)#, self.info_callback)
+        self.intrinsics = pyrealsense2.intrinsics()
+        self.intrinsics.width = camera_info_msg.width
+        self.intrinsics.height = camera_info_msg.height
+        self.intrinsics.ppx = camera_info_msg.K[2]
+        self.intrinsics.ppy = camera_info_msg.K[5]
+        self.intrinsics.fx = camera_info_msg.K[0]
+        self.intrinsics.fy = camera_info_msg.K[4]
+        # self.intrinsics.model = pyrealsense2.distortion.brown_conrady #camera_info_msg.distortion_model
+        self.intrinsics.model = pyrealsense2.distortion.modified_brown_conrady#brown_conrady#ftheta#inverse_brown_conrady #camera_info_msg.distortion_model
+        # self.intrinsics.model = pyrealsense2.distortion.none
+        self.intrinsics.coeffs = [i for i in camera_info_msg.D]
+        
         self.camera_info_K = np.array(camera_info_msg.K).reshape([3, 3])
         self.camera_info_D = np.array(camera_info_msg.D)
         ts = message_filters.TimeSynchronizer([rgb_sub, depth_sub], 60)#, 0.2,allow_headerless=False)
@@ -130,12 +143,29 @@ def convert_2D_to_3D_coords(x_image, y_image, x0, y0, fx, fy, z_3D):
     
     return x_3D, y_3D, z_3D
 
+def convert_2d_to_3d_using_realsense(x, y, depth, intrinsics):
+    result = pyrealsense2.rs2_deproject_pixel_to_point(intrinsics, [x, y], depth)
+    x_3D, y_3D, z_3D = result[2], result[0], result[1]
+    return x_3D, y_3D, z_3D
+
+class OdomMapper:
+    def __init__(self) -> None:
+        self.drone_odom_position = None
+        self.drone_odom_orientation = None
+        
+    def drone_odom_callback(self, drone_odom):
+        # global drone_odom_position, drone_odom_orientation
+        self.drone_odom_position = drone_odom.pose.pose.position
+        self.drone_odom_orientation = drone_odom.pose.pose.orientation
 
 if __name__ == '__main__':
      # Setup device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     torch.backends.cudnn.benchmark = True
-
+    
+    # create instance of Odom mapper
+    mapper = OdomMapper()
+    
     #create instance of SORT
     sort_tracker = Sort()
     
@@ -155,10 +185,10 @@ if __name__ == '__main__':
     
     rospy.init_node("siammaskimage", anonymous=True)
     # rospy.init_node('odometry_publisher')
-
+    rospy.Subscriber("/mavros/local_position/odom", Odometry, mapper.drone_odom_callback)
     odom_pub = rospy.Publisher("moving_object_odom", Odometry, queue_size=50)
     odom_broadcaster = tf.TransformBroadcaster()
-    
+    rate = rospy.Rate(sampling_rate)
     my_node = Nodo()
     original_frame = None
     while original_frame is None:
@@ -191,7 +221,7 @@ if __name__ == '__main__':
     last_time = rospy.Time.now()
     position_queue = deque(maxlen=6)
     velocity_queue = deque(maxlen=6)
-    t_points = np.arange(0, 1, 0.01)
+    t_points = np.arange(0, 1, 0.03)
     # depth_hybrid = np.zeros_like(depth_frame)
     # create an inverse from the colormap to gray values
     gray_values = np.arange(256, dtype=np.uint8)
@@ -234,6 +264,9 @@ if __name__ == '__main__':
         depth_ratio_array = depth_masked / (unit_vector_inversed_relative_depth_frame+1e-5)
         depth_ratio = depth_ratio_array[np.nonzero(depth_ratio_array)].mean()
         depth_ratio_std = depth_ratio_array[np.nonzero(depth_ratio_array)].std()
+        if np.isnan(depth_ratio) or np.isnan(depth_ratio_std):
+            depth_ratio = 50000
+            depth_ratio_std = 50000
         print("DePtH RaTi0 !$$$$$$$$$$$$$$$$$$$$$$$$:")
         print(depth_ratio)
         print("$$$$$$$$Td:")
@@ -282,77 +315,143 @@ if __name__ == '__main__':
             print(relative_depth_frame)
         elif f > 0:  # tracking
             state = siamese_track(state, original_frame, depth_hybrid, siammask, cfg, sort_tracker=sort_tracker, mask_enable=True, refine_enable=True, reset_template=True, device=device)  # track
-            if state['score'] < 0.65:
-                pass #here should call panoptic segmentation on the latest good frame with high score
-            elif state['score'] >= 0.65:
-                high_score_frame = original_frame
-            else:
-                print("Check state's score value")
-            location = state['ploygon'].flatten()
-            mask = state['mask'] > state['p'].seg_thr
-            predicted = kf.predict(state['target_pos'][0], state['target_pos'][1])
-            #cv2.rectangle(frame, (x, y), (x2, y2), (255, 0, 0), 4)
-            cv2.circle(frame, (int(state['target_pos'][0]), int(state['target_pos'][1])), 20, (0, 0, 255), 4)
-            cv2.circle(frame, (int(predicted[0]), int(predicted[1])), 20, (255, 0, 0), 4)
-            x_image = int(state['target_pos'][0])
-            y_image = int(state['target_pos'][1])
-            z_3D = depth_hybrid[y_image, x_image][0]
-            z_3D = kf_estimator.step(z_3D)
-            x_3D, y_3D, z_3D = convert_2D_to_3D_coords(x_image=x_image, y_image=y_image, x0=camera_principle_point_x, y0=camera_principle_point_x,
-                                    fx=camera_focal_length_x, fy=camera_focal_length_y, z_3D=z_3D)
-            position_queue.append([z_3D, x_3D, y_3D])
-            if f==1:
-                x_3D_old, y_3D_old, z_3D_old = x_3D, y_3D, z_3D
-            vx_3D, vy_3D, vz_3D = x_3D - x_3D_old, y_3D - y_3D_old, z_3D - z_3D_old
-            velocity_queue.append([vz_3D, vx_3D, vy_3D])
-            print("X-target = {}, Y-target = {}, Z-target = {}".format(x_3D, y_3D, z_3D))
-            
-            # first, we'll publish the transform over tf
-            odom_broadcaster.sendTransform(
-                (z_3D, y_3D, x_3D),
-                odom_quat,
-                current_time,
-                "moving_object_odom",
-                "map"
+            if state['score'] < 0.7:
+                # pass #here should call panoptic segmentation on the latest good frame with high score
+                x_3D_old = 0
+                x_3D, y_3D, z_3D = x_3D_old, y_3D_old, z_3D_old
+                vx_3D, vy_3D, vz_3D = 0, 0, 0
+                # first, we'll publish the transform over tf
+                odom_broadcaster.sendTransform(
+                    # (z_3D, y_3D, x_3D),
+                    (x_3D, y_3D, z_3D),
+                    odom_quat,
+                    current_time,
+                    "moving_object_odom",
+                    "base_link"
+                    
+                )
                 
-            )
+                # next, we'll publish the odometry message over ROS
+                odom = Odometry()
+                odom.header.stamp = current_time
+                odom.header.frame_id = "moving_object_odom"
+                curve_position_set = Bezier.Curve(t_points, np.array(position_queue))
+                curve_velocity_set = Bezier.Curve(t_points, np.array(velocity_queue))
+                #publish bezier curves of position and velocity
+                for pos, vel in zip(curve_position_set, curve_velocity_set):
+                    # set the position
+                    mapper.drone_odom_position.x += pos[0]
+                    mapper.drone_odom_position.y += pos[1]
+                    mapper.drone_odom_position.z += pos[2]
+                    odom.pose.pose = Pose(mapper.drone_odom_position, mapper.drone_odom_orientation)
+
+                    # set the velocity
+                    odom.child_frame_id = "moving_object_odom"
+                    odom.twist.twist = Twist(Vector3(*vel), Vector3(0, 0, 0))
+
+                    # publish the message
+                    odom_pub.publish(odom)
+                    my_node.moving_object_odom_rate.sleep()
+                # rate.sleep()
+                last_time = current_time
+                x_3D_old, y_3D_old, z_3D_old = x_3D, y_3D, z_3D
+                
+                
+                frame[:, :, 2] = (mask > 0) * 255 + (mask == 0) * frame[:, :, 2]
+                cv2.polylines(frame, [np.int0(location).reshape((-1, 1, 2))], True, (0, 255, 0), 3)
+                if state['track_bbs_ids'].size>0:
+                    x1 = int(state['track_bbs_ids'][-1][0])
+                    y1 = int(state['track_bbs_ids'][-1][1])
+                    x2 = int(state['track_bbs_ids'][-1][2])
+                    y2 = int(state['track_bbs_ids'][-1][3])
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), (255,0,0), 2)
+                cv2.imshow('Demo', frame)
+                key = cv2.waitKey(1)
+                if key > 0:
+                    break
+                f+=1
             
-            # next, we'll publish the odometry message over ROS
-            odom = Odometry()
-            odom.header.stamp = current_time
-            odom.header.frame_id = "moving_object_odom"
-            curve_position_set = Bezier.Curve(t_points, np.array(position_queue))
-            curve_velocity_set = Bezier.Curve(t_points, np.array(velocity_queue))
-            #publish bezier curves of position and velocity
-            for pos, vel in zip(curve_position_set, curve_velocity_set):
-                # set the position
-                odom.pose.pose = Pose(Point(*pos), Quaternion(*odom_quat))
+            elif state['score'] >= 0.7:                
+                location = state['ploygon'].flatten()
+                mask = state['mask'] > state['p'].seg_thr
+                predicted = kf.predict(state['target_pos'][0], state['target_pos'][1])
+                #cv2.rectangle(frame, (x, y), (x2, y2), (255, 0, 0), 4)
+                cv2.circle(frame, (int(state['target_pos'][0]), int(state['target_pos'][1])), 20, (0, 0, 255), 4)
+                cv2.circle(frame, (int(predicted[0]), int(predicted[1])), 20, (255, 0, 0), 4)
+                x_image = int(state['target_pos'][0])
+                y_image = int(state['target_pos'][1])
+                x_3D = depth_hybrid[y_image, x_image][0]
+                x_3D = kf_estimator.step(x_3D)
+                x_3D/=4
+                # x_3D, y_3D, z_3D = convert_2D_to_3D_coords(x_image=x_image, y_image=y_image, x0=camera_principle_point_x, y0=camera_principle_point_x,
+                #                         fx=camera_focal_length_x, fy=camera_focal_length_y, z_3D=z_3D)
+                x_3D, y_3D, z_3D = convert_2d_to_3d_using_realsense(x, y, x_3D, my_node.intrinsics)
+                
+                
+                if f==1:
+                    x_3D_old, y_3D_old, z_3D_old = x_3D, y_3D, z_3D
+                vx_3D, vy_3D, vz_3D = x_3D - x_3D_old, y_3D - y_3D_old, z_3D - z_3D_old
+                if x_3D <=4:
+                    x_3D = 0
+                # position_queue.append([z_3D, y_3D, x_3D])
+                position_queue.append([x_3D, y_3D, z_3D])
+                # velocity_queue.append([vz_3D, vy_3D, vx_3D])
+                velocity_queue.append([vx_3D, vy_3D, vz_3D])
+                print("X-target = {}, Y-target = {}, Z-target = {}".format(x_3D, y_3D, z_3D))
+                
+                # first, we'll publish the transform over tf
+                odom_broadcaster.sendTransform(
+                    # (z_3D, y_3D, x_3D),
+                    (x_3D, y_3D, z_3D),
+                    odom_quat,
+                    current_time,
+                    "moving_object_odom",
+                    "base_link"
+                    
+                )
+                
+                # next, we'll publish the odometry message over ROS
+                odom = Odometry()
+                odom.header.stamp = current_time
+                odom.header.frame_id = "moving_object_odom"
+                curve_position_set = Bezier.Curve(t_points, np.array(position_queue))
+                curve_velocity_set = Bezier.Curve(t_points, np.array(velocity_queue))
+                #publish bezier curves of position and velocity
+                for pos, vel in zip(curve_position_set, curve_velocity_set):
+                    # set the position
+                    mapper.drone_odom_position.x += pos[0]
+                    mapper.drone_odom_position.y += pos[1]
+                    mapper.drone_odom_position.z += pos[2]
+                    odom.pose.pose = Pose(mapper.drone_odom_position, mapper.drone_odom_orientation)
 
-                # set the velocity
-                odom.child_frame_id = "moving_object_odom"
-                odom.twist.twist = Twist(Vector3(*vel), Vector3(0, 0, 0))
+                    # set the velocity
+                    odom.child_frame_id = "moving_object_odom"
+                    odom.twist.twist = Twist(Vector3(*vel), Vector3(0, 0, 0))
 
-                # publish the message
-                odom_pub.publish(odom)
-
-            last_time = current_time
-            x_3D_old, y_3D_old, z_3D_old = x_3D, y_3D, z_3D
-            my_node.moving_object_odom_rate.sleep()
-            
-            frame[:, :, 2] = (mask > 0) * 255 + (mask == 0) * frame[:, :, 2]
-            cv2.polylines(frame, [np.int0(location).reshape((-1, 1, 2))], True, (0, 255, 0), 3)
-            if state['track_bbs_ids'].size>0:
-                x1 = int(state['track_bbs_ids'][-1][0])
-                y1 = int(state['track_bbs_ids'][-1][1])
-                x2 = int(state['track_bbs_ids'][-1][2])
-                y2 = int(state['track_bbs_ids'][-1][3])
-                cv2.rectangle(frame, (x1, y1), (x2, y2), (255,0,0), 2)
-            cv2.imshow('Demo', frame)
-            key = cv2.waitKey(1)
-            if key > 0:
-                break
-            f+=1
-
+                    # publish the message
+                    odom_pub.publish(odom)
+                    my_node.moving_object_odom_rate.sleep()
+                # rate.sleep()
+                last_time = current_time
+                x_3D_old, y_3D_old, z_3D_old = x_3D, y_3D, z_3D
+                
+                
+                frame[:, :, 2] = (mask > 0) * 255 + (mask == 0) * frame[:, :, 2]
+                cv2.polylines(frame, [np.int0(location).reshape((-1, 1, 2))], True, (0, 255, 0), 3)
+                if state['track_bbs_ids'].size>0:
+                    x1 = int(state['track_bbs_ids'][-1][0])
+                    y1 = int(state['track_bbs_ids'][-1][1])
+                    x2 = int(state['track_bbs_ids'][-1][2])
+                    y2 = int(state['track_bbs_ids'][-1][3])
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), (255,0,0), 2)
+                cv2.imshow('Demo', frame)
+                key = cv2.waitKey(1)
+                if key > 0:
+                    break
+                f+=1
+            else:
+                            print("Check state's score value:")
+                            print(state['score'])
         toc += cv2.getTickCount() - tic
     toc /= cv2.getTickFrequency()
     fps = f / toc
