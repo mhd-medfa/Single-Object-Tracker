@@ -251,6 +251,8 @@ if __name__ == '__main__':
         
         depth_masked = copy.deepcopy(depth_frame)
         depth_masked[np.isnan(depth_masked)] = 0
+        mask_d = depth_masked.astype(np.bool)
+        inv_mask = (mask_d != np.ones_like(mask_d))
         inversed_relative_depth_frame = (1. - relative_depth_frame)
         # standarized_inversed_relative_depth_frame = (inversed_relative_depth_frame - inversed_relative_depth_frame.mean())/inversed_relative_depth_frame.std()
         # normalized_standarized_inversed_relative_depth_frame = (standarized_inversed_relative_depth_frame - np.min(standarized_inversed_relative_depth_frame))/(np.max(standarized_inversed_relative_depth_frame)-np.min(standarized_inversed_relative_depth_frame))
@@ -275,7 +277,8 @@ if __name__ == '__main__':
         # depth_temp = copy.deepcopy(depth_frame)
         # depth_temp = depth_frame
         # depth_temp = np.where(np.isnan(depth_temp), inversed_relative_depth_frame*depth_ratio, depth_temp)
-        depth_hybrid = unit_vector_inversed_relative_depth_frame*depth_ratio
+        depth_hybrid = unit_vector_inversed_relative_depth_frame*inv_mask*depth_ratio + depth_masked
+    
         # depth_hybrid = depth_temp
         cv2.imshow("depth", depth_frame)
         # depth_frame = depth_hybrid
@@ -320,39 +323,39 @@ if __name__ == '__main__':
                 x_3D_old = 0
                 x_3D, y_3D, z_3D = x_3D_old, y_3D_old, z_3D_old
                 vx_3D, vy_3D, vz_3D = 0, 0, 0
-                # first, we'll publish the transform over tf
-                odom_broadcaster.sendTransform(
-                    # (z_3D, y_3D, x_3D),
-                    (x_3D, y_3D, z_3D),
-                    odom_quat,
-                    current_time,
-                    "moving_object_odom",
-                    "base_link"
+                # # first, we'll publish the transform over tf
+                # odom_broadcaster.sendTransform(
+                #     # (z_3D, y_3D, x_3D),
+                #     (x_3D, y_3D, z_3D),
+                #     odom_quat,
+                #     current_time,
+                #     "moving_object_odom",
+                #     "base_link"
                     
-                )
+                # )
                 
-                # next, we'll publish the odometry message over ROS
-                odom = Odometry()
-                odom.header.stamp = current_time
-                odom.header.frame_id = "moving_object_odom"
-                curve_position_set = Bezier.Curve(t_points, np.array(position_queue))
-                curve_velocity_set = Bezier.Curve(t_points, np.array(velocity_queue))
-                #publish bezier curves of position and velocity
-                for pos, vel in zip(curve_position_set, curve_velocity_set):
-                    # set the position
-                    mapper.drone_odom_position.x += pos[0]
-                    mapper.drone_odom_position.y += pos[1]
-                    mapper.drone_odom_position.z += pos[2]
-                    odom.pose.pose = Pose(mapper.drone_odom_position, mapper.drone_odom_orientation)
+                # # next, we'll publish the odometry message over ROS
+                # odom = Odometry()
+                # odom.header.stamp = current_time
+                # odom.header.frame_id = "moving_object_odom"
+                # curve_position_set = Bezier.Curve(t_points, np.array(position_queue))
+                # curve_velocity_set = Bezier.Curve(t_points, np.array(velocity_queue))
+                # #publish bezier curves of position and velocity
+                # for pos, vel in zip(curve_position_set, curve_velocity_set):
+                #     # set the position
+                #     mapper.drone_odom_position.x += pos[0]
+                #     mapper.drone_odom_position.y += pos[1]
+                #     mapper.drone_odom_position.z += pos[2]
+                #     odom.pose.pose = Pose(mapper.drone_odom_position, mapper.drone_odom_orientation)
 
-                    # set the velocity
-                    odom.child_frame_id = "moving_object_odom"
-                    odom.twist.twist = Twist(Vector3(*vel), Vector3(0, 0, 0))
+                #     # set the velocity
+                #     odom.child_frame_id = "moving_object_odom"
+                #     odom.twist.twist = Twist(Vector3(*vel), Vector3(0, 0, 0))
 
-                    # publish the message
-                    odom_pub.publish(odom)
-                    my_node.moving_object_odom_rate.sleep()
-                # rate.sleep()
+                #     # publish the message
+                #     odom_pub.publish(odom)
+                #     my_node.moving_object_odom_rate.sleep()
+                # # rate.sleep()
                 last_time = current_time
                 x_3D_old, y_3D_old, z_3D_old = x_3D, y_3D, z_3D
                 
