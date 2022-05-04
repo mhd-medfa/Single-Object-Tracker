@@ -31,7 +31,8 @@ from utils.tracker_config import TrackerConfig
 
 from utils.config_helper import load_config
 from utils.pyvotkit.region import vot_overlap, vot_float2str
-
+import copy
+img_i=1
 thrs = np.arange(0.3, 0.5, 0.05)
 high_score_frames = deque(maxlen=4)
 
@@ -174,16 +175,24 @@ def siamese_init(im, target_pos, target_sz, target_depth, model, hp=None, device
     state['target_sz'] = target_sz
     state['target_depth'] = target_depth
     high_score_frames.append([im, state])
+    # cv2.imwrite('0.png', im)
     return state
 
 
 def siamese_track(state, im, depth_im, siammask, cfg, sort_tracker, mask_enable=False, refine_enable=False, reset_template=False, device='cpu', debug=False, deep=False):
+    global img_i
     p = state['p']
     net = state['net']
     avg_chans = state['avg_chans']
     window = state['window']
     target_pos = state['target_pos']
     target_sz = state['target_sz']
+    prev_target_sz = copy.deepcopy(target_sz)
+    if 'mask' in state:
+        # prev_target_mask = (state['mask'] > state['p'].seg_thr)>0
+        prev_target_mask = copy.deepcopy(state['mask'])
+    else:
+        prev_target_mask = None
 
     wc_x = target_sz[1] + p.context_amount * sum(target_sz)
     hc_x = target_sz[0] + p.context_amount * sum(target_sz)
@@ -319,7 +328,7 @@ def siamese_track(state, im, depth_im, siammask, cfg, sort_tracker, mask_enable=
     state['target_sz'] = target_sz
     x_image = int(state['target_pos'][0])
     y_image = int(state['target_pos'][1])
-    state['target_depth'] = z_3D = depth_im[y_image, x_image][0]
+    state['target_depth'] = x_3D = depth_im[y_image, x_image][0]
     if 'dets' not in state:
         state['dets'] = np.array([[int(target_pos[0] - target_sz[0]/2), int(target_pos[1] - target_sz[1]/2.),
                         int(target_pos[0] + target_sz[0]/2.), int(target_pos[1] + target_sz[1]/2.), score[best_pscore_id]]])
@@ -348,8 +357,23 @@ def siamese_track(state, im, depth_im, siammask, cfg, sort_tracker, mask_enable=
             state['track_bbs_ids'] = np. array([])
     state['mask'] = mask_in_img if mask_enable else []
     state['ploygon'] = rbox_in_img if mask_enable else []
-    high_score_frames.append([im, state])
-    if state['score'] < 0.4 and reset_template:
+    # current_mask = (state['mask'] > state['p'].seg_thr)>0
+    current_target_mask_area = np.sum(state['mask'])
+    current_target_sz_area = state['target_sz'][0]*state['target_sz'][1]
+    prev_target_sz_area = prev_target_sz[0]*prev_target_sz[1]
+    if prev_target_mask is not None:
+        prev_target_mask_area = np.sum(prev_target_mask)
+    else: prev_target_mask_area = current_target_mask_area
+        
+    true_pos_candidate_template = (abs(prev_target_mask_area-current_target_mask_area)/prev_target_mask_area) <= 0.001 and\
+                                    abs((prev_target_sz_area-current_target_sz_area)/prev_target_sz_area) <=0.001
+    if state["score"] > 0.85 and true_pos_candidate_template :
+        high_score_frames.append([im, state])
+        f_name = '{}.png'.format(img_i)
+        cv2.imwrite(f_name, im)
+        img_i+=1
+
+    if state['score'] < 0.7 and reset_template:
         print("~~~~~~~~~~~~Score of current template~~~~~~~~~~~")
         print(state['score'])
         best_frame = sorted(list(high_score_frames), key = lambda x: abs(x[1]['target_depth']-state['target_depth']))[0]
