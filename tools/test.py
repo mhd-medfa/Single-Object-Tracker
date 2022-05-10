@@ -23,8 +23,10 @@ from utils.bbox_helper import get_axis_aligned_bbox, cxy_wh_2_rect
 from utils.benchmark_helper import load_dataset, dataset_zoo
 
 import torch
+import torch.nn as nn
 from torch.autograd import Variable
 import torch.nn.functional as F
+from torchvision import models, transforms
 
 from utils.anchors import Anchors
 from utils.tracker_config import TrackerConfig
@@ -32,7 +34,7 @@ from utils.tracker_config import TrackerConfig
 from utils.config_helper import load_config
 from utils.pyvotkit.region import vot_overlap, vot_float2str
 import copy
-img_i=1
+# img_i=1
 thrs = np.arange(0.3, 0.5, 0.05)
 high_score_frames = deque(maxlen=4)
 
@@ -55,6 +57,34 @@ parser.add_argument('--video', default='', type=str, help='test special video')
 parser.add_argument('--cpu', action='store_true', help='cpu mode')
 parser.add_argument('--debug', action='store_true', help='debug mode')
 
+loader = transforms.Compose([transforms.ToPILImage(),
+        transforms.Resize(224),
+        # transforms.CenterCrop(input_size),
+        transforms.ToTensor(),
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
+
+def image_loader(image):
+    """load image, returns cuda tensor"""
+    image = loader(image).float()
+    image = image.unsqueeze(0) 
+    return image.cuda()
+
+def resnet18_inference(image):
+    num_classes = 2
+    # Detect if we have a GPU available
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    model = models.resnet18()
+    num_ftrs = model.fc.in_features
+    model.fc = nn.Linear(num_ftrs, num_classes)
+    model.load_state_dict(torch.load('./experiments/resnet_18/resnet18-thesis-final.pth'))
+    model = model.to(device=device)
+
+    model.eval()
+    with torch.no_grad():
+        logits = model.forward(image)
+    ps = torch.exp(logits)
+    _, predTest = torch.max(ps,1)
+    return predTest.cpu().numpy()[0] ## same value in all cases
 
 def to_torch(ndarray):
     if type(ndarray).__module__ == 'numpy':
@@ -174,6 +204,7 @@ def siamese_init(im, target_pos, target_sz, target_depth, model, hp=None, device
     state['target_pos'] = target_pos
     state['target_sz'] = target_sz
     state['target_depth'] = target_depth
+    state['pred_cls'] = 0 # For now, let's assume you cropped a car in first frame
     high_score_frames.append([im, state])
     # cv2.imwrite('0.png', im)
     return state
@@ -329,12 +360,12 @@ def siamese_track(state, im, depth_im, siammask, cfg, sort_tracker, mask_enable=
     x_image = int(state['target_pos'][0])
     y_image = int(state['target_pos'][1])
     state['target_depth'] = x_3D = depth_im[y_image, x_image][0]
+    x1,y1,x2,y2 = int(target_pos[0] - target_sz[0]/2), int(target_pos[1] - target_sz[1]/2.),\
+                        int(target_pos[0] + target_sz[0]/2.), int(target_pos[1] + target_sz[1]/2.)
     if 'dets' not in state:
-        state['dets'] = np.array([[int(target_pos[0] - target_sz[0]/2), int(target_pos[1] - target_sz[1]/2.),
-                        int(target_pos[0] + target_sz[0]/2.), int(target_pos[1] + target_sz[1]/2.), score[best_pscore_id]]])
+        state['dets'] = np.array([[x1,y1,x2,y2, score[best_pscore_id]]])
     else:
-        det = np.array([[int(target_pos[0] - target_sz[0]/2), int(target_pos[1] - target_sz[1]/2.),
-                        int(target_pos[0] + target_sz[0]/2.), int(target_pos[1] + target_sz[1]/2.), score[best_pscore_id]]])
+        det = np.array([[x1,y1,x2,y2, score[best_pscore_id]]])
         state['dets'] = np.append(state['dets'], det, axis=0)
         if len(state['dets']) > 10:
             state['dets'] = state['dets'][-10:]
@@ -364,14 +395,19 @@ def siamese_track(state, im, depth_im, siammask, cfg, sort_tracker, mask_enable=
     if prev_target_mask is not None:
         prev_target_mask_area = np.sum(prev_target_mask)
     else: prev_target_mask_area = current_target_mask_area
-        
+    cropped_im = im[y1:y2, x1:x2]
+    
+    cuda_cropped_im = image_loader(cropped_im)
+    pred_cls = resnet18_inference(cuda_cropped_im)
     true_pos_candidate_template = (abs(prev_target_mask_area-current_target_mask_area)/prev_target_mask_area) <= 0.001 and\
-                                    abs((prev_target_sz_area-current_target_sz_area)/prev_target_sz_area) <=0.001
-    if state["score"] > 0.85 and true_pos_candidate_template :
+                                    abs((prev_target_sz_area-current_target_sz_area)/prev_target_sz_area) <=0.001 and\
+                                        pred_cls==0
+    state['pred_cls'] = pred_cls # 0 if car else 1
+    if state["score"] > 0.7 and pred_cls==0:#true_pos_candidate_template :
         high_score_frames.append([im, state])
-        f_name = '{}.png'.format(img_i)
-        cv2.imwrite(f_name, im)
-        img_i+=1
+        # f_name = '{}.png'.format(img_i)
+        # cv2.imwrite(f_name, im)
+        # img_i+=1
 
     if state['score'] < 0.7 and reset_template:
         print("~~~~~~~~~~~~Score of current template~~~~~~~~~~~")

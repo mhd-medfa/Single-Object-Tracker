@@ -5,7 +5,6 @@ import message_filters
 import cv2
 import os
 import numpy as np
-# import ros_numpy
 import tf
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Point, Pose, Quaternion, Twist, Vector3
@@ -62,7 +61,7 @@ class Nodo(object):
         self.intrinsics.fx = camera_info_msg.K[0]
         self.intrinsics.fy = camera_info_msg.K[4]
         # self.intrinsics.model = pyrealsense2.distortion.brown_conrady #camera_info_msg.distortion_model
-        self.intrinsics.model = pyrealsense2.distortion.modified_brown_conrady#brown_conrady#ftheta#inverse_brown_conrady #camera_info_msg.distortion_model
+        self.intrinsics.model = pyrealsense2.distortion.brown_conrady#brown_conrady#ftheta#inverse_brown_conrady #camera_info_msg.distortion_model
         # self.intrinsics.model = pyrealsense2.distortion.none
         self.intrinsics.coeffs = [i for i in camera_info_msg.D]
         
@@ -262,6 +261,8 @@ if __name__ == '__main__':
     prev_target_sz = None
     periodic_target_sz = None
     periodic_flag = True
+    track_flag = True
+    lost_counter = 0
     while not rospy.is_shutdown():
         current_time = rospy.Time.now()
         # since all odometry is 6DOF we'll need a quaternion created from yaw
@@ -311,7 +312,7 @@ if __name__ == '__main__':
         # depth_temp = copy.deepcopy(depth_frame)
         # depth_temp = depth_frame
         # depth_temp = np.where(np.isnan(depth_temp), inversed_relative_depth_frame*depth_ratio, depth_temp)
-        depth_hybrid = unit_vector_inversed_relative_depth_frame*inv_mask*depth_ratio + depth_masked
+        depth_hybrid = unit_vector_inversed_relative_depth_frame*inv_mask*depth_ratio/2 + depth_masked
     
         # depth_hybrid = depth_temp
         cv2.imshow("depth", depth_frame)
@@ -343,7 +344,7 @@ if __name__ == '__main__':
             target_sz = np.array([w, h])
             x_image = int(target_pos[0])
             y_image = int(target_pos[1])
-            x_3D = depth_hybrid[y_image, x_image][0]
+            x_3D = int(depth_hybrid[y_image, x_image][0]) #int(np.sum(depth_hybrid[y_image-2:y_image+2, x_image-2:x_image+2][0]))/4
             kf_estimator = KalmanFilterEstimator(inversed_relative_depth_frame_mean, inversed_relative_depth_frame_std**2, x_3D)
             target_depth = x_3D = kf_estimator.step(x_3D)
             state = siamese_init(original_frame, target_pos, target_sz, target_depth, siammask, cfg['hp'], device=device)  # init tracker
@@ -368,24 +369,45 @@ if __name__ == '__main__':
             # print("True Positive Flag:")
             # print(true_pos_object)  
             # print("Periodic Flag:")
-            # print(periodic_flag)               
-            if f==1 or (state['score'] >= 0.7): # and true_pos_object and periodic_flag):                
+            # print(periodic_flag)
+            
+            if f==1:
+                track_flag = True
+            elif state['pred_cls']!=0 or x_3D_old < 5:#f==1 or (state['score'] >= 0.7 and (x_3D_old>2 or state['pred_cls']==0)): # and true_pos_object and periodic_flag):                
+                lost_counter +=1
+                if lost_counter>=4:
+                    track_flag=False
+            else:
+                lost_counter=0
+                track_flag=True
+            if track_flag:
+                if f==1:
+                    x_3D_old = x_3D
                 location = state['ploygon'].flatten()
                 mask = state['mask'] > state['p'].seg_thr
                 predicted = kf.predict(state['target_pos'][0], state['target_pos'][1])
                 #cv2.rectangle(frame, (x, y), (x2, y2), (255, 0, 0), 4)
-                cv2.circle(frame, (int(state['target_pos'][0]), int(state['target_pos'][1])), 20, (0, 0, 255), 4)
+                if state['pred_cls']==0:
+                    cv2.circle(frame, (int(state['target_pos'][0]), int(state['target_pos'][1])), 20, (0, 0, 255), 4)
                 # cv2.circle(frame, (int(predicted[0]), int(predicted[1])), 20, (255, 0, 0), 4)
                 x_image = int(state['target_pos'][0])
                 y_image = int(state['target_pos'][1])
-                x_3D = depth_hybrid[y_image, x_image][0]
-                x_3D = kf_estimator.step(x_3D)
-                x_3D/=2
+                x_3D = int(np.sum(depth_hybrid[y_image-2:y_image+2, x_image-2:x_image+2][0]))/4 #depth_hybrid[y_image, x_image][0]
+                x_3D = (7*x_3D_old+x_3D)/8 #kf_estimator.step(x_3D)
+                # x_3D/=2
+                x_3D = round(x_3D, 2)
                 # x_3D, y_3D, z_3D = convert_2D_to_3D_coords(x_image=x_image, y_image=y_image, x0=camera_principle_point_x, y0=camera_principle_point_x,
                 #                         fx=camera_focal_length_x, fy=camera_focal_length_y, z_3D=z_3D)
                 x_3D, y_3D, z_3D = convert_2d_to_3d_using_realsense(x, y, x_3D, my_node.intrinsics)
+                if x_3D >4:
+                    y_3D/=10
                 
-                
+                if f>1:
+                    # x_3D = (7*x_3D_old+x_3D)/8 #kf_estimator.step(x_3D)
+                    y_3D = (7*y_3D_old+y_3D)/8 #kf_estimator.step(x_3D)
+                    z_3D = (7*z_3D_old+z_3D)/8 #kf_estimator.step(x_3D)
+                y_3D = round(y_3D, 2)
+                z_3D = round(z_3D, 2)
                 if f==1:
                     x_3D_old, y_3D_old, z_3D_old = x_3D, y_3D, z_3D
                 vx_3D, vy_3D, vz_3D = x_3D - x_3D_old, y_3D - y_3D_old, z_3D - z_3D_old
@@ -442,16 +464,16 @@ if __name__ == '__main__':
                 last_time = current_time
                 x_3D_old, y_3D_old, z_3D_old = x_3D, y_3D, z_3D
                 
-                
-                frame[:, :, 2] = (mask > 0) * 255 + (mask == 0) * frame[:, :, 2]
-                cv2.polylines(frame, [np.int0(location).reshape((-1, 1, 2))], True, (0, 255, 0), 3)
-                # if state['track_bbs_ids'].size>0:
-                #     x1 = int(state['track_bbs_ids'][-1][0])
-                #     y1 = int(state['track_bbs_ids'][-1][1])
-                #     x2 = int(state['track_bbs_ids'][-1][2])
-                #     y2 = int(state['track_bbs_ids'][-1][3])
-                #     cv2.rectangle(frame, (x1, y1), (x2, y2), (255,0,0), 2)
-                cv2.imshow('Demo', frame)
+                if state['pred_cls']==0:
+                    frame[:, :, 2] = (mask > 0) * 255 + (mask == 0) * frame[:, :, 2]
+                    cv2.polylines(frame, [np.int0(location).reshape((-1, 1, 2))], True, (0, 255, 0), 3)
+                    # if state['track_bbs_ids'].size>0:
+                    #     x1 = int(state['track_bbs_ids'][-1][0])
+                    #     y1 = int(state['track_bbs_ids'][-1][1])
+                    #     x2 = int(state['track_bbs_ids'][-1][2])
+                    #     y2 = int(state['track_bbs_ids'][-1][3])
+                    #     cv2.rectangle(frame, (x1, y1), (x2, y2), (255,0,0), 2)
+                    cv2.imshow('Demo', frame)
                 key = cv2.waitKey(1)
                 if key > 0:
                     # rospy.spin()
