@@ -409,7 +409,7 @@ def siamese_track(state, im, depth_im, siammask, cfg, sort_tracker, mask_enable=
         # cv2.imwrite(f_name, im)
         # img_i+=1
 
-    if state['score'] < 0.7 and reset_template:
+    if state['score'] < 0.6 and reset_template:
         print("~~~~~~~~~~~~Score of current template~~~~~~~~~~~")
         print(state['score'])
         best_frame = sorted(list(high_score_frames), key = lambda x: abs(x[1]['target_depth']-state['target_depth']))[0]

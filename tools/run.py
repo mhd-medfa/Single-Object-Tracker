@@ -232,6 +232,7 @@ if __name__ == '__main__':
     cv2.namedWindow("Demo", cv2.WND_PROP_FULLSCREEN)
     # cv2.setWindowProperty("SiamMask", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
     try:
+        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
         init_rect = cv2.selectROI('Demo', frame, False, False)
         x, y, w, h = init_rect
     except Exception as e:
@@ -262,6 +263,7 @@ if __name__ == '__main__':
     periodic_target_sz = None
     periodic_flag = True
     track_flag = True
+    deccelerating_rate = 1.0
     lost_counter = 0
     while not rospy.is_shutdown():
         current_time = rospy.Time.now()
@@ -286,6 +288,7 @@ if __name__ == '__main__':
         
         depth_masked = copy.deepcopy(depth_frame)
         depth_masked[np.isnan(depth_masked)] = 0
+        depth_masked[depth_masked<1e-2] = 0
         mask_d = depth_masked.astype(np.bool)
         inv_mask = (mask_d != np.ones_like(mask_d))
         inversed_relative_depth_frame = (1. - relative_depth_frame)
@@ -298,7 +301,7 @@ if __name__ == '__main__':
         unit_vector_inversed_relative_depth_frame = standarized_inversed_relative_depth_frame / np.linalg.norm(standarized_inversed_relative_depth_frame.squeeze(), 1)
         # unit_vector_inversed_relative_depth_frame = (10*unit_vector_inversed_relative_depth_frame).astype(np.uint8)
         # normalized_inversed_relative_depth_frame = (unit_vector_inversed_relative_depth_frame - np.min(unit_vector_inversed_relative_depth_frame))/(np.max(unit_vector_inversed_relative_depth_frame)-np.min(unit_vector_inversed_relative_depth_frame))
-        depth_ratio_array = depth_masked / (unit_vector_inversed_relative_depth_frame+1e-5)
+        depth_ratio_array = depth_masked[mask_d] / (unit_vector_inversed_relative_depth_frame[mask_d]+1e-5)
         depth_ratio = depth_ratio_array[np.nonzero(depth_ratio_array)].mean()
         depth_ratio_std = depth_ratio_array[np.nonzero(depth_ratio_array)].std()
         if np.isnan(depth_ratio) or np.isnan(depth_ratio_std):
@@ -312,7 +315,7 @@ if __name__ == '__main__':
         # depth_temp = copy.deepcopy(depth_frame)
         # depth_temp = depth_frame
         # depth_temp = np.where(np.isnan(depth_temp), inversed_relative_depth_frame*depth_ratio, depth_temp)
-        depth_hybrid = unit_vector_inversed_relative_depth_frame*inv_mask*depth_ratio/2 + depth_masked
+        depth_hybrid = unit_vector_inversed_relative_depth_frame*inv_mask*depth_ratio/3 + depth_masked
     
         # depth_hybrid = depth_temp
         cv2.imshow("depth", depth_frame)
@@ -373,9 +376,10 @@ if __name__ == '__main__':
             
             if f==1:
                 track_flag = True
-            elif state['pred_cls']!=0 or x_3D_old < 5:#f==1 or (state['score'] >= 0.7 and (x_3D_old>2 or state['pred_cls']==0)): # and true_pos_object and periodic_flag):                
+
+            elif state['pred_cls']!=0:#f==1 or (state['score'] >= 0.7 and (x_3D_old>2 or state['pred_cls']==0)): # and true_pos_object and periodic_flag):                
                 lost_counter +=1
-                if lost_counter>=4:
+                if lost_counter>=5:
                     track_flag=False
             else:
                 lost_counter=0
@@ -392,15 +396,15 @@ if __name__ == '__main__':
                 # cv2.circle(frame, (int(predicted[0]), int(predicted[1])), 20, (255, 0, 0), 4)
                 x_image = int(state['target_pos'][0])
                 y_image = int(state['target_pos'][1])
-                x_3D = int(np.sum(depth_hybrid[y_image-2:y_image+2, x_image-2:x_image+2][0]))/4 #depth_hybrid[y_image, x_image][0]
+                x_3D = int(np.sum(depth_hybrid[y_image-2:y_image+2, x_image-2:x_image+2][0]))/2 #depth_hybrid[y_image, x_image][0]
                 x_3D = (7*x_3D_old+x_3D)/8 #kf_estimator.step(x_3D)
                 # x_3D/=2
                 x_3D = round(x_3D, 2)
                 # x_3D, y_3D, z_3D = convert_2D_to_3D_coords(x_image=x_image, y_image=y_image, x0=camera_principle_point_x, y0=camera_principle_point_x,
                 #                         fx=camera_focal_length_x, fy=camera_focal_length_y, z_3D=z_3D)
                 x_3D, y_3D, z_3D = convert_2d_to_3d_using_realsense(x, y, x_3D, my_node.intrinsics)
-                if x_3D >4:
-                    y_3D/=10
+                # if x_3D >4:
+                y_3D/=-10
                 
                 if f>1:
                     # x_3D = (7*x_3D_old+x_3D)/8 #kf_estimator.step(x_3D)
@@ -411,13 +415,16 @@ if __name__ == '__main__':
                 if f==1:
                     x_3D_old, y_3D_old, z_3D_old = x_3D, y_3D, z_3D
                 vx_3D, vy_3D, vz_3D = x_3D - x_3D_old, y_3D - y_3D_old, z_3D - z_3D_old
-                # if x_3D <= 2.5:
-                #     # x_3D, y_3D, z_3D  = 0, 0, 0#, 0, 0, 0
-                #     position_queue.append([0, 0, 0])
-                #     # x_3D, y_3D, z_3D, vx_3D, vy_3D, vz_3D  = 0, 0, 0, 0, 0, 0
-                # else:
-                #     position_queue.append([x_3D, y_3D, z_3D])
-                    
+                if x_3D <= 7:
+                    deccelerating_rate -= (deccelerating_rate*0.2)
+                    # position_queue.append([x_3D, y_3D, z_3D])
+                    # x_3D, y_3D, z_3D, vx_3D, vy_3D, vz_3D  = 0, 0, 0, 0, 0, 0
+                if x_3D <=4:
+                    deccelerating_rate = 0
+                else:
+                    deccelerating_rate = 1.0
+                    position_queue.append([x_3D, y_3D, z_3D])
+                x_3D, y_3D, z_3D  = x_3D*deccelerating_rate, y_3D,  z_3D#, 0, 0, 0    
                 # position_queue.append([z_3D, y_3D, x_3D])
                 position_queue.append([x_3D, y_3D, z_3D])
                 # velocity_queue.append([vz_3D, vy_3D, vx_3D])
@@ -473,6 +480,7 @@ if __name__ == '__main__':
                     #     x2 = int(state['track_bbs_ids'][-1][2])
                     #     y2 = int(state['track_bbs_ids'][-1][3])
                     #     cv2.rectangle(frame, (x1, y1), (x2, y2), (255,0,0), 2)
+                    frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
                     cv2.imshow('Demo', frame)
                 key = cv2.waitKey(1)
                 if key > 0:
@@ -530,10 +538,11 @@ if __name__ == '__main__':
                 #     x2 = int(state['track_bbs_ids'][-1][2])
                 #     y2 = int(state['track_bbs_ids'][-1][3])
                 #     cv2.rectangle(frame, (x1, y1), (x2, y2), (255,0,0), 2)
-                # cv2.imshow('Demo', frame)
-                # key = cv2.waitKey(1)
-                # if key > 0:
-                #     break
+                frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                cv2.imshow('Demo', frame)
+                key = cv2.waitKey(1)
+                if key > 0:
+                    break
                 f+=1
                 key = cv2.waitKey(1)
                 if key > 0:
