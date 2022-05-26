@@ -315,7 +315,8 @@ if __name__ == '__main__':
         # depth_temp = copy.deepcopy(depth_frame)
         # depth_temp = depth_frame
         # depth_temp = np.where(np.isnan(depth_temp), inversed_relative_depth_frame*depth_ratio, depth_temp)
-        depth_hybrid = unit_vector_inversed_relative_depth_frame*inv_mask*depth_ratio/3 + depth_masked
+        depth_hybrid = (unit_vector_inversed_relative_depth_frame*inv_mask*depth_ratio + depth_masked)/3 #3.4
+        # depth_hybrid = depth_frame
     
         # depth_hybrid = depth_temp
         cv2.imshow("depth", depth_frame)
@@ -347,7 +348,7 @@ if __name__ == '__main__':
             target_sz = np.array([w, h])
             x_image = int(target_pos[0])
             y_image = int(target_pos[1])
-            x_3D = int(depth_hybrid[y_image, x_image][0]) #int(np.sum(depth_hybrid[y_image-2:y_image+2, x_image-2:x_image+2][0]))/4
+            x_3D = int(np.sum(depth_hybrid[y_image-3:y_image+3, x_image-3:x_image+3][0]))/36 #int(depth_hybrid[y_image, x_image][0]) #int(np.sum(depth_hybrid[y_image-2:y_image+2, x_image-2:x_image+2][0]))/4
             kf_estimator = KalmanFilterEstimator(inversed_relative_depth_frame_mean, inversed_relative_depth_frame_std**2, x_3D)
             target_depth = x_3D = kf_estimator.step(x_3D)
             state = siamese_init(original_frame, target_pos, target_sz, target_depth, siammask, cfg['hp'], device=device)  # init tracker
@@ -396,8 +397,8 @@ if __name__ == '__main__':
                 # cv2.circle(frame, (int(predicted[0]), int(predicted[1])), 20, (255, 0, 0), 4)
                 x_image = int(state['target_pos'][0])
                 y_image = int(state['target_pos'][1])
-                x_3D = int(np.sum(depth_hybrid[y_image-2:y_image+2, x_image-2:x_image+2][0]))/2 #depth_hybrid[y_image, x_image][0]
-                x_3D = (7*x_3D_old+x_3D)/8 #kf_estimator.step(x_3D)
+                x_3D = int(np.sum(depth_hybrid[y_image-2:y_image+2, x_image-2:x_image+2][0])) #depth_hybrid[y_image, x_image][0]
+                x_3D = kf_estimator.step(x_3D)#(7*x_3D_old+x_3D)/8 #kf_estimator.step(x_3D)
                 # x_3D/=2
                 x_3D = round(x_3D, 2)
                 # x_3D, y_3D, z_3D = convert_2D_to_3D_coords(x_image=x_image, y_image=y_image, x0=camera_principle_point_x, y0=camera_principle_point_x,
@@ -408,8 +409,8 @@ if __name__ == '__main__':
                 
                 if f>1:
                     # x_3D = (7*x_3D_old+x_3D)/8 #kf_estimator.step(x_3D)
-                    y_3D = (7*y_3D_old+y_3D)/8 #kf_estimator.step(x_3D)
-                    z_3D = (7*z_3D_old+z_3D)/8 #kf_estimator.step(x_3D)
+                    y_3D = kf_estimator.step(y_3D)#(7*y_3D_old+y_3D)/8 #kf_estimator.step(x_3D)
+                    z_3D = kf_estimator.step(z_3D)#(7*z_3D_old+z_3D)/8 #kf_estimator.step(x_3D)
                 y_3D = round(y_3D, 2)
                 z_3D = round(z_3D, 2)
                 if f==1:

@@ -10,7 +10,7 @@ class MiDaS:
     def __init__(self, model_type="MiDaS_small") -> None:
         
         # Load a MiDas model for depth estimation
-        # model_type = "DPT_Large"     # MiDaS v3 - Large     (highest accuracy, slowest inference speed)
+        model_type = "DPT_Large"     # MiDaS v3 - Large     (highest accuracy, slowest inference speed)
         # model_type = "DPT_Hybrid"   # MiDaS v3 - Hybrid    (medium accuracy, medium inference speed)
         self.model_type = model_type  # MiDaS v2.1 - Small   (lowest accuracy, highest inference speed)
 
