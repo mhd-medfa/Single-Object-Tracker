@@ -315,7 +315,8 @@ if __name__ == '__main__':
         # depth_temp = copy.deepcopy(depth_frame)
         # depth_temp = depth_frame
         # depth_temp = np.where(np.isnan(depth_temp), inversed_relative_depth_frame*depth_ratio, depth_temp)
-        depth_hybrid = (unit_vector_inversed_relative_depth_frame*inv_mask*depth_ratio + depth_masked)/3 #3.4
+        relative_depth = unit_vector_inversed_relative_depth_frame*inv_mask*depth_ratio/3
+        depth_hybrid = relative_depth + depth_masked #3.4
         # depth_hybrid = depth_frame
     
         # depth_hybrid = depth_temp
@@ -343,12 +344,12 @@ if __name__ == '__main__':
         # cv2.waitKey(0)
         
         if f == 0:  # init
-            f=1
+            f = 1
             target_pos = np.array([x + w / 2, y + h / 2])
             target_sz = np.array([w, h])
             x_image = int(target_pos[0])
             y_image = int(target_pos[1])
-            x_3D = int(np.sum(depth_hybrid[y_image-3:y_image+3, x_image-3:x_image+3][0]))/36 #int(depth_hybrid[y_image, x_image][0]) #int(np.sum(depth_hybrid[y_image-2:y_image+2, x_image-2:x_image+2][0]))/4
+            x_3D = int(np.sum(depth_hybrid[y_image-3:y_image+3, x_image-3:x_image+3]))/36 #int(depth_hybrid[y_image, x_image][0]) #int(np.sum(depth_hybrid[y_image-2:y_image+2, x_image-2:x_image+2][0]))/4
             kf_estimator = KalmanFilterEstimator(inversed_relative_depth_frame_mean, inversed_relative_depth_frame_std**2, x_3D)
             target_depth = x_3D = kf_estimator.step(x_3D)
             state = siamese_init(original_frame, target_pos, target_sz, target_depth, siammask, cfg['hp'], device=device)  # init tracker
@@ -378,8 +379,8 @@ if __name__ == '__main__':
             if f==1:
                 track_flag = True
 
-            elif state['pred_cls']!=0:#f==1 or (state['score'] >= 0.7 and (x_3D_old>2 or state['pred_cls']==0)): # and true_pos_object and periodic_flag):                
-                lost_counter +=1
+            elif state['pred_cls'] != 0:#f==1 or (state['score'] >= 0.7 and (x_3D_old>2 or state['pred_cls']==0)): # and true_pos_object and periodic_flag):                
+                lost_counter += 1
                 if lost_counter>=5:
                     track_flag=False
             else:
@@ -397,35 +398,36 @@ if __name__ == '__main__':
                 # cv2.circle(frame, (int(predicted[0]), int(predicted[1])), 20, (255, 0, 0), 4)
                 x_image = int(state['target_pos'][0])
                 y_image = int(state['target_pos'][1])
-                x_3D = int(np.sum(depth_hybrid[y_image-2:y_image+2, x_image-2:x_image+2][0])) #depth_hybrid[y_image, x_image][0]
+                x_3D = np.sum(depth_hybrid[y_image-2:y_image+2, x_image-2:x_image+2])/16 #depth_hybrid[y_image, x_image][0]
                 x_3D = kf_estimator.step(x_3D)#(7*x_3D_old+x_3D)/8 #kf_estimator.step(x_3D)
                 # x_3D/=2
-                x_3D = round(x_3D, 2)
+                x_3D = round(x_3D, 3)
                 # x_3D, y_3D, z_3D = convert_2D_to_3D_coords(x_image=x_image, y_image=y_image, x0=camera_principle_point_x, y0=camera_principle_point_x,
                 #                         fx=camera_focal_length_x, fy=camera_focal_length_y, z_3D=z_3D)
                 x_3D, y_3D, z_3D = convert_2d_to_3d_using_realsense(x, y, x_3D, my_node.intrinsics)
                 # if x_3D >4:
                 y_3D/=-10
+                z_3D/=-10
                 
                 if f>1:
                     # x_3D = (7*x_3D_old+x_3D)/8 #kf_estimator.step(x_3D)
                     y_3D = kf_estimator.step(y_3D)#(7*y_3D_old+y_3D)/8 #kf_estimator.step(x_3D)
                     z_3D = kf_estimator.step(z_3D)#(7*z_3D_old+z_3D)/8 #kf_estimator.step(x_3D)
-                y_3D = round(y_3D, 2)
-                z_3D = round(z_3D, 2)
+                y_3D = round(y_3D, 3)
+                z_3D = round(z_3D, 3)
                 if f==1:
                     x_3D_old, y_3D_old, z_3D_old = x_3D, y_3D, z_3D
                 vx_3D, vy_3D, vz_3D = x_3D - x_3D_old, y_3D - y_3D_old, z_3D - z_3D_old
                 if x_3D <= 7:
-                    deccelerating_rate -= (deccelerating_rate*0.2)
+                    deccelerating_rate -= (deccelerating_rate*0.1)
                     # position_queue.append([x_3D, y_3D, z_3D])
                     # x_3D, y_3D, z_3D, vx_3D, vy_3D, vz_3D  = 0, 0, 0, 0, 0, 0
-                if x_3D <=4:
+                if x_3D <= 2:
                     deccelerating_rate = 0
                 else:
                     deccelerating_rate = 1.0
                     position_queue.append([x_3D, y_3D, z_3D])
-                x_3D, y_3D, z_3D  = x_3D*deccelerating_rate, y_3D,  z_3D#, 0, 0, 0    
+                x_3D, y_3D, z_3D = x_3D*deccelerating_rate, y_3D, z_3D #, 0, 0, 0    
                 # position_queue.append([z_3D, y_3D, x_3D])
                 position_queue.append([x_3D, y_3D, z_3D])
                 # velocity_queue.append([vz_3D, vy_3D, vx_3D])
