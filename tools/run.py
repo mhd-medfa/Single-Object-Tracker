@@ -8,6 +8,7 @@ import numpy as np
 import tf
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Point, Pose, Quaternion, Twist, Vector3
+from visualization_msgs.msg import MarkerArray, Marker
 import glob
 from test import *
 import os,sys,inspect
@@ -33,6 +34,8 @@ parser.add_argument('--base_path', default='../../data/tennis', help='datasets')
 parser.add_argument('--cpu', action='store_true', help='cpu mode')
 args = parser.parse_args()
 sampling_rate = 30
+markerarray_i=0
+
 class Nodo(object):
     def __init__(self):
         # Params
@@ -175,6 +178,43 @@ def odom_publisher(mapper, odom, odom_pub,curve_position_set,curve_velocity_set)
         odom_pub.publish(odom)
         r.sleep()
 
+def markerarray_publisher(mapper, marker, marker_array_msg, markerarray_pub, curve_position_set, curve_velocity_set):
+    global markerarray_i
+    # r = rospy.Rate(sampling_rate)
+    for pos in curve_position_set:
+        # set the position
+        pos_x = mapper.drone_odom_position.x + pos[0]
+        pos_y = mapper.drone_odom_position.y + pos[1]
+        pos_z = mapper.drone_odom_position.z + pos[2]
+        
+        # marker.pose = Pose(Point(*(pos_x, pos_y, pos_z)), mapper.drone_odom_orientation)
+
+        # set the velocity
+        marker.header.frame_id = "/map"
+        marker.id = markerarray_i
+        marker.type = marker.SPHERE
+        marker.action = marker.ADD
+        marker.color.r = 0.2
+        marker.color.g = 0.2
+        marker.color.b = 0.0
+        marker.color.a = 1.0
+        marker.scale.x = 0.2
+        marker.scale.y = 0.2
+        marker.scale.z = 0.2
+        marker.pose.position.x = pos_x
+        marker.pose.position.y = pos_y
+        marker.pose.position.z = pos_z
+        marker.pose.orientation.w = 1.0
+        # marker.frame_locked = False
+        
+        
+        marker_array_msg.markers.append(marker)
+        # publish the message
+    # marker.ns = "Goal-%u"%i
+    markerarray_pub.publish(marker_array_msg)
+    markerarray_i += 1
+    # r.sleep()
+
 def stay_still_odom_publisher(mapper, odom, odom_pub):
     r = rospy.Rate(sampling_rate)
     odom.pose.pose = Pose(mapper.drone_odom_position, mapper.drone_odom_orientation)
@@ -196,7 +236,7 @@ if __name__ == '__main__':
     mapper = OdomMapper()
     
     #create instance of SORT
-    sort_tracker = Sort()
+    sort_tracker = None#Sort()
     
     # Load Kalman filter to predict the trajectory
     kf = KalmanFilter()
@@ -216,7 +256,9 @@ if __name__ == '__main__':
     # rospy.init_node('odometry_publisher')
     rospy.Subscriber("/mavros/local_position/odom", Odometry, mapper.drone_odom_callback)
     odom_pub = rospy.Publisher("moving_object_odom", Odometry, queue_size=50)
+    markerarray_pub = rospy.Publisher("moving_object_markerarray", MarkerArray, queue_size=50)
     odom_broadcaster = tf.TransformBroadcaster()
+    markarray_broadcaster = tf.TransformBroadcaster()
     rate = rospy.Rate(sampling_rate)
     my_node = Nodo()
     original_frame = None
@@ -379,7 +421,7 @@ if __name__ == '__main__':
             if f==1:
                 track_flag = True
 
-            elif state['pred_cls'] != 0:#f==1 or (state['score'] >= 0.7 and (x_3D_old>2 or state['pred_cls']==0)): # and true_pos_object and periodic_flag):                
+            elif state['pred_cls'] != state['init_pred_cls']:#f==1 or (state['score'] >= 0.7 and (x_3D_old>2 or state['pred_cls']==0)): # and true_pos_object and periodic_flag):                
                 lost_counter += 1
                 if lost_counter>=5:
                     track_flag=False
@@ -393,7 +435,7 @@ if __name__ == '__main__':
                 mask = state['mask'] > state['p'].seg_thr
                 predicted = kf.predict(state['target_pos'][0], state['target_pos'][1])
                 #cv2.rectangle(frame, (x, y), (x2, y2), (255, 0, 0), 4)
-                if state['pred_cls']==0:
+                if state['pred_cls']==state['init_pred_cls']:
                     cv2.circle(frame, (int(state['target_pos'][0]), int(state['target_pos'][1])), 20, (0, 0, 255), 4)
                 # cv2.circle(frame, (int(predicted[0]), int(predicted[1])), 20, (255, 0, 0), 4)
                 x_image = int(state['target_pos'][0])
@@ -406,7 +448,7 @@ if __name__ == '__main__':
                 #                         fx=camera_focal_length_x, fy=camera_focal_length_y, z_3D=z_3D)
                 x_3D, y_3D, z_3D = convert_2d_to_3d_using_realsense(x, y, x_3D, my_node.intrinsics)
                 # if x_3D >4:
-                y_3D/=-10
+                y_3D/=10
                 z_3D/=-10
                 
                 if f>1:
@@ -418,15 +460,20 @@ if __name__ == '__main__':
                 if f==1:
                     x_3D_old, y_3D_old, z_3D_old = x_3D, y_3D, z_3D
                 vx_3D, vy_3D, vz_3D = x_3D - x_3D_old, y_3D - y_3D_old, z_3D - z_3D_old
-                if x_3D <= 7:
-                    deccelerating_rate -= (deccelerating_rate*0.1)
-                    # position_queue.append([x_3D, y_3D, z_3D])
-                    # x_3D, y_3D, z_3D, vx_3D, vy_3D, vz_3D  = 0, 0, 0, 0, 0, 0
                 if x_3D <= 2:
                     deccelerating_rate = 0
+                elif x_3D <= 7:
+                    deccelerating_rate -= (deccelerating_rate*0.2)
+                    # position_queue.append([x_3D, y_3D, z_3D])
+                    # x_3D, y_3D, z_3D, vx_3D, vy_3D, vz_3D  = 0, 0, 0, 0, 0, 0
+                #elif x_3D > 9:
+                #    if deccelerating_rate < 0.1:
+                #        deccelerating_rate = 0.1
+                #    deccelerating_rate += (deccelerating_rate*0.1)
+                #    deccelerating_rate = min(1, deccelerating_rate)
                 else:
                     deccelerating_rate = 1.0
-                    position_queue.append([x_3D, y_3D, z_3D])
+                    #position_queue.append([x_3D, y_3D, z_3D])
                 x_3D, y_3D, z_3D = x_3D*deccelerating_rate, y_3D, z_3D #, 0, 0, 0    
                 # position_queue.append([z_3D, y_3D, x_3D])
                 position_queue.append([x_3D, y_3D, z_3D])
@@ -445,6 +492,16 @@ if __name__ == '__main__':
                     
                 )
                 
+                # markarray_broadcaster.sendTransform(
+                #     # (z_3D, y_3D, x_3D),
+                #     (x_3D, y_3D, z_3D),
+                #     odom_quat,
+                #     current_time,
+                #     "moving_object_markerarray",
+                #     "base_link"
+                    
+                # )
+                
                 # next, we'll publish the odometry message over ROS
                 odom = Odometry()
                 odom.header.stamp = current_time
@@ -456,6 +513,16 @@ if __name__ == '__main__':
                                                                          'curve_position_set':curve_position_set,
                                                                          'curve_velocity_set':curve_velocity_set})
                 thread.start()
+                
+                # let's publish MarkerArray of the Moving Object Pose
+                marker_array_msg = MarkerArray()
+                marker = Marker()
+                thread2 = threading.Thread(target=markerarray_publisher, kwargs={'mapper':mapper, 'marker': marker,
+                                                                                'marker_array_msg': marker_array_msg,
+                                                                                'markerarray_pub':markerarray_pub,
+                                                                                'curve_position_set':curve_position_set,
+                                                                                'curve_velocity_set':curve_velocity_set})
+                thread2.start()
                 # for pos, vel in zip(curve_position_set, curve_velocity_set):
                 #     # set the position
                 #     pos_x = mapper.drone_odom_position.x + pos[0]
@@ -474,7 +541,7 @@ if __name__ == '__main__':
                 last_time = current_time
                 x_3D_old, y_3D_old, z_3D_old = x_3D, y_3D, z_3D
                 
-                if state['pred_cls']==0:
+                if state['pred_cls']==state['init_pred_cls']:
                     frame[:, :, 2] = (mask > 0) * 255 + (mask == 0) * frame[:, :, 2]
                     cv2.polylines(frame, [np.int0(location).reshape((-1, 1, 2))], True, (0, 255, 0), 3)
                     # if state['track_bbs_ids'].size>0:
@@ -505,6 +572,16 @@ if __name__ == '__main__':
                     "base_link"  
                 )
                 
+                # markarray_broadcaster.sendTransform(
+                #     # (z_3D, y_3D, x_3D),
+                #     (x_3D, y_3D, z_3D),
+                #     odom_quat,
+                #     current_time,
+                #     "moving_object_markerarray",
+                #     "base_link"
+                    
+                # )
+                
                 # next, we'll publish the odometry message over ROS
                 odom = Odometry()
                 odom.header.stamp = current_time
@@ -529,6 +606,16 @@ if __name__ == '__main__':
                 # for i in range(100):
                 #     odom_pub.publish(odom)
                 #     my_node.moving_object_odom_rate.sleep()
+                # let's publish MarkerArray of the Moving Object Pose
+                marker_array_msg = MarkerArray()
+                marker = Marker()
+                thread2 = threading.Thread(target=markerarray_publisher, kwargs={'mapper':mapper, 'marker': marker,
+                                                                                'marker_array_msg': marker_array_msg,
+                                                                                'markerarray_pub':markerarray_pub,
+                                                                                'curve_position_set':curve_position_set,
+                                                                                'curve_velocity_set':curve_velocity_set})
+                thread2.start()
+                
                 last_time = current_time
                 # x_3D_old, y_3D_old, z_3D_old = x_3D, y_3D, z_3D
                 

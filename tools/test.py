@@ -37,7 +37,7 @@ import copy
 # img_i=1
 thrs = np.arange(0.3, 0.5, 0.05)
 high_score_frames = deque(maxlen=4)
-
+init_pred_cls = None
 parser = argparse.ArgumentParser(description='Test SiamMask')
 parser.add_argument('--arch', dest='arch', default='', choices=['Custom',],
                     help='architecture of pretrained model')
@@ -69,22 +69,25 @@ def image_loader(image):
     image = image.unsqueeze(0) 
     return image.cuda()
 
-def resnet18_inference(image):
+def resnet18_inference():
     num_classes = 2
     # Detect if we have a GPU available
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    model = models.resnet18()
+    model = models.resnet18(pretrained=True)
     num_ftrs = model.fc.in_features
     model.fc = nn.Linear(num_ftrs, num_classes)
     model.load_state_dict(torch.load('./experiments/resnet_18/resnet18-thesis-final.pth'))
     model = model.to(device=device)
 
     model.eval()
-    with torch.no_grad():
-        logits = model.forward(image)
-    ps = torch.exp(logits)
-    _, predTest = torch.max(ps,1)
-    return predTest.cpu().numpy()[0] ## same value in all cases
+    # with torch.no_grad():
+    #     logits = model.forward(image)
+    # ps = torch.exp(logits)
+    # _, predTest = torch.max(ps,1)
+    # return predTest.cpu().numpy()[0] ## same value in all cases
+    return model
+
+resnet_model = resnet18_inference()
 
 def to_torch(ndarray):
     if type(ndarray).__module__ == 'numpy':
@@ -167,6 +170,7 @@ def generate_anchor(cfg, score_size):
 
 
 def siamese_init(im, target_pos, target_sz, target_depth, model, hp=None, device='cpu'):
+    global init_pred_cls
     state = dict()
     state['im_h'] = im.shape[0]
     state['im_w'] = im.shape[1]
@@ -204,14 +208,28 @@ def siamese_init(im, target_pos, target_sz, target_depth, model, hp=None, device
     state['target_pos'] = target_pos
     state['target_sz'] = target_sz
     state['target_depth'] = target_depth
-    state['pred_cls'] = 0 # For now, let's assume you cropped a car in first frame
+    x1,y1,x2,y2 = int(target_pos[0] - target_sz[0]/2), int(target_pos[1] - target_sz[1]/2.),\
+                        int(target_pos[0] + target_sz[0]/2.), int(target_pos[1] + target_sz[1]/2.)
+    cropped_im = im[y1:y2, x1:x2]
+    
+    cuda_cropped_im = image_loader(cropped_im)
+    with torch.no_grad():
+        logits = resnet_model.forward(cuda_cropped_im)
+    ps = torch.exp(logits)
+    _, predTest = torch.max(ps,1)
+    
+    pred_cls = predTest.cpu().numpy()[0]
+    
+    state['pred_cls'] = pred_cls # For now, let's assume you cropped a car in first frame
+    init_pred_cls = pred_cls
+    state['init_pred_cls'] = init_pred_cls
     high_score_frames.append([im, state])
     # cv2.imwrite('0.png', im)
     return state
 
 
 def siamese_track(state, im, depth_im, siammask, cfg, sort_tracker, mask_enable=False, refine_enable=False, reset_template=False, device='cpu', debug=False, deep=False):
-    global img_i
+    global init_pred_cls
     p = state['p']
     net = state['net']
     avg_chans = state['avg_chans']
@@ -374,18 +392,18 @@ def siamese_track(state, im, depth_im, siammask, cfg, sort_tracker, mask_enable=
     state['score'] = score[best_pscore_id]
     # update SORT
     # if state['score']
-    if 'dets' in state:
-        if len(state['dets'])>=10:
-            xywhs = state['dets'][:, 0:4]
-            confs = state['dets'][:, 4]
-            clss = np.zeros_like(confs)
-            if deep:
-                track_bbs_ids = sort_tracker.update(xywhs, confs, clss, im)
-            else:
-                track_bbs_ids = sort_tracker.update(state['dets'])
-            state['track_bbs_ids'] = np.array(track_bbs_ids)
-        else:
-            state['track_bbs_ids'] = np. array([])
+    # if 'dets' in state:
+    #     if len(state['dets'])>=10:
+    #         xywhs = state['dets'][:, 0:4]
+    #         confs = state['dets'][:, 4]
+    #         clss = np.zeros_like(confs)
+    #         if deep:
+    #             track_bbs_ids = sort_tracker.update(xywhs, confs, clss, im)
+    #         else:
+    #             track_bbs_ids = sort_tracker.update(state['dets'])
+    #         state['track_bbs_ids'] = np.array(track_bbs_ids)
+    #     else:
+    #         state['track_bbs_ids'] = np. array([])
     state['mask'] = mask_in_img if mask_enable else []
     state['ploygon'] = rbox_in_img if mask_enable else []
     # current_mask = (state['mask'] > state['p'].seg_thr)>0
@@ -395,15 +413,22 @@ def siamese_track(state, im, depth_im, siammask, cfg, sort_tracker, mask_enable=
     if prev_target_mask is not None:
         prev_target_mask_area = np.sum(prev_target_mask)
     else: prev_target_mask_area = current_target_mask_area
+    
     cropped_im = im[y1:y2, x1:x2]
     
     cuda_cropped_im = image_loader(cropped_im)
-    pred_cls = resnet18_inference(cuda_cropped_im)
+    with torch.no_grad():
+        logits = resnet_model.forward(cuda_cropped_im)
+    ps = torch.exp(logits)
+    _, predTest = torch.max(ps,1)
+    
+    pred_cls = predTest.cpu().numpy()[0] #resnet18_inference(cuda_cropped_im)
     true_pos_candidate_template = (abs(prev_target_mask_area-current_target_mask_area)/prev_target_mask_area) <= 0.001 and\
                                     abs((prev_target_sz_area-current_target_sz_area)/prev_target_sz_area) <=0.001 and\
                                         pred_cls==0
     state['pred_cls'] = pred_cls # 0 if car else 1
-    if state["score"] > 0.7 and pred_cls==0:#true_pos_candidate_template :
+    state['init_pred_cls'] = init_pred_cls
+    if state["score"] > 0.7 and pred_cls==init_pred_cls:#true_pos_candidate_template :
         high_score_frames.append([im, state])
         # f_name = '{}.png'.format(img_i)
         # cv2.imwrite(f_name, im)
