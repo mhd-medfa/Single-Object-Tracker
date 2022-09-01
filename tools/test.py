@@ -211,6 +211,7 @@ def siamese_init(im, target_pos, target_sz, target_depth, model, hp=None, device
     x1,y1,x2,y2 = int(target_pos[0] - target_sz[0]/2), int(target_pos[1] - target_sz[1]/2.),\
                         int(target_pos[0] + target_sz[0]/2.), int(target_pos[1] + target_sz[1]/2.)
     cropped_im = im[y1:y2, x1:x2]
+    # cropped_im = im[max(0, y1):min(y2, im.shape[0]), max(0, x1):min(x2, im.shape[1])]
     
     cuda_cropped_im = image_loader(cropped_im)
     with torch.no_grad():
@@ -415,6 +416,7 @@ def siamese_track(state, im, depth_im, siammask, cfg, sort_tracker, mask_enable=
     else: prev_target_mask_area = current_target_mask_area
     
     cropped_im = im[y1:y2, x1:x2]
+    # cropped_im = im[max(0, y1):min(y2, im.shape[0]), max(0, x1):min(x2, im.shape[1])]
     
     cuda_cropped_im = image_loader(cropped_im)
     with torch.no_grad():

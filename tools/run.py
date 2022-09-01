@@ -23,6 +23,7 @@ from MiDaS import MiDaS
 import copy
 import pyrealsense2
 import threading
+from pykalman import KalmanFilter
 
 parser = argparse.ArgumentParser(description='PyTorch Tracking Demo')
 
@@ -92,7 +93,7 @@ class Nodo(object):
         self.loop_rate.sleep()
         return self.depth
 
-class KalmanFilter:
+class KalmanFilterCV:
     kf = cv2.KalmanFilter(4, 2)
     kf.measurementMatrix = np.array([[1, 0, 0, 0], [0, 1, 0, 0]], np.float32)
     kf.transitionMatrix = np.array([[1, 0, 1, 0], [0, 1, 0, 1], [0, 0, 1, 0], [0, 0, 0, 1]], np.float32)
@@ -119,7 +120,7 @@ class KalmanFilterEstimator:
         self.x_opt = 0.0
         self.e = self.var_eta
         self.base_iteration = True
-        
+       
     def step(self, sensor_reading):
         z = sensor_reading # sensor readings
         if self.base_iteration:
@@ -130,11 +131,51 @@ class KalmanFilterEstimator:
         self.x_opt = self.K*z + (1-self.K)*(self.x_opt)
         return self.x_opt
 
+class KalmanFilterPy:
+    def __init__(self, pos) -> None:
+        self.initial_state_mean = [pos[0], 0, pos[1], 0, pos[2], 0]
+        self.observation_matrix = [[1, 0, 0, 0, 0, 0],
+                                   [0, 0, 1, 0, 0, 0],
+                                   [0, 0, 0, 0, 1, 0],]
+        self.transition_matrix = [[1, 1, 0, 0, 0, 0],
+                                  [0, 1, 0, 0, 0, 0],
+                                  [0, 0, 1, 1, 0, 0],
+                                  [0, 0, 0, 1, 0, 0],
+                                  [0, 0, 0, 0, 1, 1],
+                                  [0, 0, 0, 0, 0, 1]]
+        self.observation_matrix = [[1, 0, 0, 0, 0, 0],
+                                   [0, 0, 1, 0, 0, 0],
+                                   [0, 0, 0, 0, 1, 0],]
+        self.process_noise_cov = [[1, 0, 0, 0],
+                                  [0, 1, 0, 0],
+                                  [0, 0, 1, 0],
+                                  [0, 0, 0, 1]]
+        self.observation_noise_cov = [[1, 0, 0, 0],
+                                      [0, 1, 0, 0],
+                                      [0, 0, 1, 0]]
+        # self.kf = KalmanFilter(dim_x=6, dim_z=3)
+        self.kf = KalmanFilter(n_dim_state=6,
+                                n_dim_obs=3,
+                                transition_matrices = self.transition_matrix,
+                                observation_matrices = self.observation_matrix,
+                                initial_state_mean = self.initial_state_mean,
+                                random_state=np.random.RandomState(0)
+                                )
+        # self.kf.Q = self.process_noise_cov
+        # self.kf.R = self.observation_noise_cov
+        # self.kf.P *= 1000.0
+        # self.kf.x = self.initial_state_mean
+        # self.kf.F = self.transition_matrix
+        # self.kf.H = self.observation_matrix
+    def step(self, current_pos, current_cov, measurement):
+        new_pos, new_cov = \
+                    self.kf.filter_update(current_pos, current_cov, measurement)
+        return new_pos, new_cov
+
 def convert_2D_to_3D_coords(x_image, y_image, x0, y0, fx, fy, z_3D):
     """
     you can find the values of the camera intrinsic parameters at ./data/depth_Depth_metadata.csv
     """
-    
     camera_principle_point_x = x0
     camera_principle_point_y = y0
     camera_focal_length_x = fx
@@ -155,13 +196,13 @@ class OdomMapper:
     def __init__(self) -> None:
         self.drone_odom_position = None
         self.drone_odom_orientation = None
-        
+    
     def drone_odom_callback(self, drone_odom):
         # global drone_odom_position, drone_odom_orientation
         self.drone_odom_position = drone_odom.pose.pose.position
         self.drone_odom_orientation = drone_odom.pose.pose.orientation
 
-def odom_publisher(mapper, odom, odom_pub,curve_position_set,curve_velocity_set):
+def odom_publisher(mapper, odom, odom_pub, curve_position_set, curve_velocity_set):
     r = rospy.Rate(sampling_rate)
     for pos, vel in zip(curve_position_set, curve_velocity_set):
         # set the position
@@ -239,7 +280,7 @@ if __name__ == '__main__':
     sort_tracker = None#Sort()
     
     # Load Kalman filter to predict the trajectory
-    kf = KalmanFilter()
+    kf = KalmanFilterCV()
     
     # MiDaS
     midas = MiDaS()
@@ -307,6 +348,7 @@ if __name__ == '__main__':
     track_flag = True
     deccelerating_rate = 1.0
     lost_counter = 0
+    current_cov = [0, 0, 0, 0, 0, 0]
     while not rospy.is_shutdown():
         current_time = rospy.Time.now()
         # since all odometry is 6DOF we'll need a quaternion created from yaw
@@ -392,8 +434,10 @@ if __name__ == '__main__':
             x_image = int(target_pos[0])
             y_image = int(target_pos[1])
             x_3D = int(np.sum(depth_hybrid[y_image-3:y_image+3, x_image-3:x_image+3]))/36 #int(depth_hybrid[y_image, x_image][0]) #int(np.sum(depth_hybrid[y_image-2:y_image+2, x_image-2:x_image+2][0]))/4
-            kf_estimator = KalmanFilterEstimator(inversed_relative_depth_frame_mean, inversed_relative_depth_frame_std**2, x_3D)
-            target_depth = x_3D = kf_estimator.step(x_3D)
+            vx_3D = 0
+            # kf_estimator = KalmanFilterEstimator(inversed_relative_depth_frame_mean, inversed_relative_depth_frame_std**2, x_3D)
+            kf_estimator = KalmanFilterPy([x_3D, x_image, y_image])
+            target_depth = x_3D
             state = siamese_init(original_frame, target_pos, target_sz, target_depth, siammask, cfg['hp'], device=device)  # init tracker
             print(depth_hybrid)
             print("relative depth")
@@ -418,18 +462,17 @@ if __name__ == '__main__':
             # print("Periodic Flag:")
             # print(periodic_flag)
             
-            if f==1:
+            if f == 1:
                 track_flag = True
-
             elif state['pred_cls'] != state['init_pred_cls']:#f==1 or (state['score'] >= 0.7 and (x_3D_old>2 or state['pred_cls']==0)): # and true_pos_object and periodic_flag):                
                 lost_counter += 1
-                if lost_counter>=5:
-                    track_flag=False
+                if lost_counter >= 5:
+                    track_flag = False
             else:
-                lost_counter=0
-                track_flag=True
+                lost_counter = 0
+                track_flag = True
             if track_flag:
-                if f==1:
+                if f == 1:
                     x_3D_old = x_3D
                 location = state['ploygon'].flatten()
                 mask = state['mask'] > state['p'].seg_thr
@@ -441,20 +484,26 @@ if __name__ == '__main__':
                 x_image = int(state['target_pos'][0])
                 y_image = int(state['target_pos'][1])
                 x_3D = np.sum(depth_hybrid[y_image-2:y_image+2, x_image-2:x_image+2])/16 #depth_hybrid[y_image, x_image][0]
-                x_3D = kf_estimator.step(x_3D)#(7*x_3D_old+x_3D)/8 #kf_estimator.step(x_3D)
+                # x_3D = kf_estimator.step(x_3D)#(7*x_3D_old+x_3D)/8 #kf_estimator.step(x_3D)
                 # x_3D/=2
                 x_3D = round(x_3D, 3)
                 # x_3D, y_3D, z_3D = convert_2D_to_3D_coords(x_image=x_image, y_image=y_image, x0=camera_principle_point_x, y0=camera_principle_point_x,
                 #                         fx=camera_focal_length_x, fy=camera_focal_length_y, z_3D=z_3D)
                 x_3D, y_3D, z_3D = convert_2d_to_3d_using_realsense(x, y, x_3D, my_node.intrinsics)
                 # if x_3D >4:
-                y_3D/=10
-                z_3D/=-10
+                y_3D /= 10
+                z_3D /= -10
                 
+                # if x_image < target_sz[0]/4 and vx_3D > 0:
+                #     z_3D += 1e-7*z_3D
+                # elif x_image > target_sz[0]*2/4 and vx_3D > 0:
+                #     z_3D -= 1e-7*z_3D
                 if f>1:
                     # x_3D = (7*x_3D_old+x_3D)/8 #kf_estimator.step(x_3D)
-                    y_3D = kf_estimator.step(y_3D)#(7*y_3D_old+y_3D)/8 #kf_estimator.step(x_3D)
-                    z_3D = kf_estimator.step(z_3D)#(7*z_3D_old+z_3D)/8 #kf_estimator.step(x_3D)
+                    # y_3D = kf_estimator.step(y_3D)#(7*y_3D_old+y_3D)/8 #kf_estimator.step(x_3D)
+                    # z_3D = kf_estimator.step(z_3D)#(7*z_3D_old+z_3D)/8 #kf_estimator.step(x_3D)
+                    [x_3D, vx_3D, y_3D, vy_3D, z_3D, vz_3D], current_cov = kf_estimator.step([x_3D_old, vx_3D, y_3D_old, vy_3D, z_3D_old, vz_3D],\
+                                                                        current_cov, [x_3D, y_3D, z_3D])
                 y_3D = round(y_3D, 3)
                 z_3D = round(z_3D, 3)
                 if f==1:
