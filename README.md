@@ -1,32 +1,29 @@
-# SiamMask forked by Augmented Startups
-
-**NEW:** now including code for both training and inference!
+# 3D-SiamMask
 
 
-[![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/fast-online-object-tracking-and-segmentation/visual-object-tracking-vot201718)](https://paperswithcode.com/sota/visual-object-tracking-vot201718?p=fast-online-object-tracking-and-segmentation)
+This is the official implementation for 3D-SiamMask (RemoteSensing2022). For technical details, please refer to:
 
-This is the official implementation with *training* code for SiamMask (CVPR2019). For technical details, please refer to:
+**3D-SiamMask: Vision-Based Multi-Rotor Aerial-Vehicle Tracking for a Moving Object** <br />
+[Mohamad Al Mdfaa](https://mhd-medfa.github.io/)\*, [Geesara Kulathunga](https://scholar.google.ru/citations?user=6VtrN-MAAAAJ&hl=en)\*, [Alexandr Klimchik](https://scholar.google.fr/citations?user=KLpMBj0AAAAJ&hl=en)\* (\* denotes equal contribution) <br />
+**Remote Sensing 2022** <br />
+**[[Paper](https://www.mdpi.com/1945298)] [[Video](https://youtu.be/za2jyAssKWE)] [[Project Page](https://sites.google.com/view/3d-siammask/home)]** <br />
 
-**Fast Online Object Tracking and Segmentation: A Unifying Approach** <br />
-[Qiang Wang](http://www.robots.ox.ac.uk/~qwang/)\*, [Li Zhang](http://www.robots.ox.ac.uk/~lz)\*, [Luca Bertinetto](http://www.robots.ox.ac.uk/~luca)\*, [Weiming Hu](https://scholar.google.com/citations?user=Wl4tl4QAAAAJ&hl=en), [Philip H.S. Torr](https://scholar.google.it/citations?user=kPxa2w0AAAAJ&hl=en&oi=ao) (\* denotes equal contribution) <br />
-**CVPR 2019** <br />
-**[[Paper](https://arxiv.org/abs/1812.05050)] [[Video](https://youtu.be/I_iOVrcpEBw)] [[Project Page](http://www.robots.ox.ac.uk/~qwang/SiamMask)]** <br />
-
-
-<div align="center">
-  <img src="http://www.robots.ox.ac.uk/~qwang/SiamMask/img/SiamMask.jpg" width="600px" />
-</div>
 
 ### Bibtex
 If you find this code useful, please consider citing:
 
 ```
-@inproceedings{wang2019fast,
-    title={Fast online object tracking and segmentation: A unifying approach},
-    author={Wang, Qiang and Zhang, Li and Bertinetto, Luca and Hu, Weiming and Torr, Philip HS},
-    booktitle={Proceedings of the IEEE conference on computer vision and pattern recognition},
-    year={2019}
+@article{al20223d,
+  title={3D-SiamMask: Vision-Based Multi-Rotor Aerial-Vehicle Tracking for a Moving Object},
+  author={Al Mdfaa, Mohamad and Kulathunga, Geesara and Klimchik, Alexandr},
+  journal={Remote Sensing},
+  volume={14},
+  number={22},
+  pages={5756},
+  year={2022},
+  publisher={MDPI}
 }
+
 ```
 
 
@@ -37,7 +34,7 @@ If you find this code useful, please consider citing:
 4. [Training Models](#training-models)
 
 ## Environment setup
-This code has been tested on Ubuntu 16.04, Python 3.6, Pytorch 0.4.1, CUDA 9.2, RTX 2080 GPUs
+This code has been tested on Ubuntu 16.04, Python 3.6, Pytorch 0.4.1, CUDA 11.4, RTX 2060 GPUs
 
 - Clone the repository 
 ```
@@ -66,7 +63,9 @@ cd $SiamMask/experiments/siammask_sharp
 wget http://www.robots.ox.ac.uk/~qwang/SiamMask_VOT.pth
 wget http://www.robots.ox.ac.uk/~qwang/SiamMask_DAVIS.pth
 ```
-- Run `demo.py`
+
+- 
+- Run `run.py`
 
 ```shell
 cd $SiamMask/experiments/siammask_sharp
@@ -128,19 +127,6 @@ bash test_mask_refine.sh config_davis.json SiamMask_DAVIS.pth DAVIS2017 0
 bash test_mask_refine.sh config_davis.json SiamMask_DAVIS.pth ytb_vos 0
 ```
 
-### Results
-These are the reproduction results from this repository. All results can be downloaded from our [project page](http://www.robots.ox.ac.uk/~qwang/SiamMask/).
-
-|                           <sub>Tracker</sub>                           |      <sub>VOT2016</br>EAO /  A / R</sub>     |      <sub>VOT2018</br>EAO / A / R</sub>      |  <sub>DAVIS2016</br>J / F</sub>  |  <sub>DAVIS2017</br>J / F</sub>  |     <sub>Youtube-VOS</br>J_s / J_u / F_s / F_u</sub>     |     <sub>Speed</sub>     |
-|:----------------------------------------------------------------------:|:--------------------------------------------:|:--------------------------------------------:|:--------------------------------:|:--------------------------------:|:--------------------------------------------------------:|:------------------------:|
-| <sub>[SiamMask-box](http://www.robots.ox.ac.uk/~qwang/SiamMask/)</sub> |       <sub>0.412/0.623/0.233</sub>       |       <sub>0.363/0.584/0.300</sub>       |               - / -              |               - / -              |                      - / - / - / -                       | <sub>**77** FPS</sub> |
-| <sub>[SiamMask](http://www.robots.ox.ac.uk/~qwang/SiamMask/)</sub> | <sub>**0.433**/**0.639**/**0.214**</sub> | <sub>**0.380**/**0.609**/**0.276**</sub> | <sub>**0.713**/**0.674**</sub> | <sub>**0.543**/**0.585**</sub> | <sub>**0.602**/**0.451**/**0.582**/**0.477**</sub> |   <sub>56 FPS</sub>   |
-| <sub>[SiamMask-LD](http://www.robots.ox.ac.uk/~qwang/SiamMask/)</sub> | <sub>**0.455**/**0.634**/**0.219**</sub> | <sub>**0.423**/**0.615**/**0.248**</sub> | - / - | - / - | - / - / - / - | <sub>56 FPS</sub> |
-
-**Note:** 
-- Speed are tested on a NVIDIA RTX 2080. 
-- `-box` reports an axis-aligned bounding box from the box branch.
-- `-LD` means training with large dataset (ytb-bb+ytb-vos+vid+coco+det).
 
 ## License
 Licensed under an MIT license.
