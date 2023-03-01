@@ -162,7 +162,7 @@ bash test_mask_refine.sh config_davis.json SiamMask_DAVIS.pth ytb_vos 0
 ```
 
 ## References
-The simulator world is based on the repo:
+The local planner is based on this repo:
 https://github.com/GPrathap/trajectory-tracker
 
 The tracker was mostly inspired by SiamMask work:
