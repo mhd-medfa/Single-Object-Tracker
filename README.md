@@ -26,6 +26,7 @@ If you find this code useful, please consider citing:
 
 ```
 
+[![Watch This Video](https://img.youtube.com/vi/za2jyAssKWE/0.jpg)](https://youtu.be/za2jyAssKWE)
 
 ## Contents
 1. [Environment Setup](#environment-setup)
@@ -34,12 +35,43 @@ If you find this code useful, please consider citing:
 4. [Training Models](#training-models)
 
 ## Environment setup
-This code has been tested on Ubuntu 16.04, Python 3.6, Pytorch 0.4.1, CUDA 11.4, RTX 2060 GPUs
+This code has been tested on Docker, Ubuntu 18.04, Python 3.6, Pytorch 0.4.1, CUDA 11.4, RTX 2060 GPUs
+
+### **Method 1 - Recommended**
+- Pull the docker image
+
+```shell
+docker pull medfa1/3d-siammask:latest
+```
+
+```shell
+docker run -itd --name sot  --privileged \
+    --net=host --gpus all \
+    --env="NVIDIA_DRIVER_CAPABILITIES=all" \
+    --env="DISPLAY=$DISPLAY" \
+    --env="QT_X11_NO_MITSHM=1" \
+    --volume="/tmp/.X11-unix:/tmp/.X11-unix:rw" \ medfa1/3d-siammask:latest
+```
+
+### **Method 2**
+- Clone the TrajectoryTracker repository
+
+```shell
+git clone https://github.com/GPrathap/trajectory-tracker.git
+```
+, and follow instructions in README.md to build the environment.
+
+- Clone the CustomRobots repository and utilize `car_junctuion/gas_station`
+
+```shell
+git clone https://github.com/JdeRobot/CustomRobots.git
+```
+This step assumes that the have experience with ROS and you know what to do.
 
 - Clone the repository 
-```
-git clone https://github.com/mhd-medfa/SiamMask.git && cd SiamMask
-export SiamMask=$PWD
+```shell
+git clone https://github.com/mhd-medfa/Single-Object-Tracker.git && cd Single-Object-Tracker
+export SOT=$PWD
 ```
 - Setup python environment
 ```
@@ -48,6 +80,7 @@ source activate siammask
 conda install pytorch torchvision torchaudio cudatoolkit=10.2 -c pytorch
 pip3 install opencv-python
 pip3 install cython
+pip3 install pykalman
 bash make.sh
 ```
 - Add the project to your PYTHONPATH
@@ -59,49 +92,50 @@ export PYTHONPATH=$PWD:$PYTHONPATH
 - [Setup](#environment-setup) your environment
 - Download the SiamMask model
 ```shell
-cd $SiamMask/experiments/siammask_sharp
+cd $SOT/experiments/siammask_sharp
 wget http://www.robots.ox.ac.uk/~qwang/SiamMask_VOT.pth
 wget http://www.robots.ox.ac.uk/~qwang/SiamMask_DAVIS.pth
 ```
+- Check the local_planner
+```shell
+xhost +
+docker exec -it sot bash
+```
 
-- 
+Now to run the local planner you need to run the following command as explained in the [video](https://www.youtube.com/watch?v=12MtXTtKRBE):
+```
+1- roslaunch drone_sim sim.launch
+2- roslaunch state_machine take_off.launch
+3- roslaunch state_machine rviz_p4.launch
+4- roslaunch state_machine fsm_trajectory_point_stabilizer.launch
+5- roslaunch state_machine px4_reg.launch
+```
+[Watch the video on YouTube](https://www.youtube.com/watch?v=12MtXTtKRBE)
+
 - Run `run.py`
 
+If the local planner in the previous step works well, re-run only the instructions `(1, 2, 3, and 4)` also run the Single-Object Tracker
+
 ```shell
-cd $SiamMask/experiments/siammask_sharp
+cd $SOT/tools
 export PATH="/root/anaconda3/bin:$PATH"
 export PYTHONPATH="/root/anaconda3/envs/siammask/bin/python3.6"
 source activate siammask
-python ../../tools/demo.py --resume SiamMask_DAVIS.pth --config config_davis.json
+python run.py
 ```
-Or
-
-- Run `realtime_demo.py`
-
-```shell
-cd $SiamMask/experiments/siammask_sharp
-export PATH="/root/anaconda3/bin:$PATH"
-export PYTHONPATH="/root/anaconda3/envs/siammask/bin/python3.6"
-source activate siammask
-python ../../tools/realtime_demo.py --resume SiamMask_DAVIS.pth --config config_davis.json
-```
-
-<div align="center">
-  <img src="http://www.robots.ox.ac.uk/~qwang/SiamMask/img/SiamMask_demo.gif" width="500px" />
-</div>
-
+After selecting the object, run `5` and don't forget to press Publish Waypoints in rviz and to stop the take_off.launch `(3)`.
 
 ## Testing
 - [Setup](#environment-setup) your environment
 - Download test data
 ```shell
-cd $SiamMask/data
+cd $SOT/data
 sudo apt-get install jq
 bash get_test_data.sh
 ```
 - Download pretrained models
 ```shell
-cd $SiamMask/experiments/siammask_sharp
+cd $SOT/experiments/siammask_sharp
 wget http://www.robots.ox.ac.uk/~qwang/SiamMask_VOT.pth
 wget http://www.robots.ox.ac.uk/~qwang/SiamMask_VOT_LD.pth
 wget http://www.robots.ox.ac.uk/~qwang/SiamMask_DAVIS.pth
@@ -127,7 +161,14 @@ bash test_mask_refine.sh config_davis.json SiamMask_DAVIS.pth DAVIS2017 0
 bash test_mask_refine.sh config_davis.json SiamMask_DAVIS.pth ytb_vos 0
 ```
 
+## References
+The simulator world is based on the repo:
+https://github.com/GPrathap/trajectory-tracker
 
+The tracker was mostly inspired by SiamMask work:
+https://github.com/foolwood/SiamMask
+
+For the full list of  references, check out the paper.
 ## License
 Licensed under an MIT license.
 
