@@ -125,42 +125,6 @@ python run.py
 ```
 After selecting the object, run `5` and don't forget to press Publish Waypoints in rviz and to stop the take_off.launch `(3)`.
 
-## Testing
-- [Setup](#environment-setup) your environment
-- Download test data
-```shell
-cd $SOT/data
-sudo apt-get install jq
-bash get_test_data.sh
-```
-- Download pretrained models
-```shell
-cd $SOT/experiments/siammask_sharp
-wget http://www.robots.ox.ac.uk/~qwang/SiamMask_VOT.pth
-wget http://www.robots.ox.ac.uk/~qwang/SiamMask_VOT_LD.pth
-wget http://www.robots.ox.ac.uk/~qwang/SiamMask_DAVIS.pth
-```
-- Evaluate performance on [VOT](http://www.votchallenge.net/)
-```shell
-bash test_mask_refine.sh config_vot.json SiamMask_VOT.pth VOT2016 0
-bash test_mask_refine.sh config_vot.json SiamMask_VOT.pth VOT2018 0
-bash test_mask_refine.sh config_vot.json SiamMask_VOT.pth VOT2019 0
-bash test_mask_refine.sh config_vot18.json SiamMask_VOT_LD.pth VOT2016 0
-bash test_mask_refine.sh config_vot18.json SiamMask_VOT_LD.pth VOT2018 0
-python ../../tools/eval.py --dataset VOT2016 --tracker_prefix C --result_dir ./test/VOT2016
-python ../../tools/eval.py --dataset VOT2018 --tracker_prefix C --result_dir ./test/VOT2018
-python ../../tools/eval.py --dataset VOT2019 --tracker_prefix C --result_dir ./test/VOT2019
-```
-- Evaluate performance on [DAVIS](https://davischallenge.org/) (less than 50s)
-```shell
-bash test_mask_refine.sh config_davis.json SiamMask_DAVIS.pth DAVIS2016 0
-bash test_mask_refine.sh config_davis.json SiamMask_DAVIS.pth DAVIS2017 0
-```
-- Evaluate performance on [Youtube-VOS](https://youtube-vos.org/) (need download data from [website](https://youtube-vos.org/dataset/download))
-```shell
-bash test_mask_refine.sh config_davis.json SiamMask_DAVIS.pth ytb_vos 0
-```
-
 ## References
 The local planner is based on this repo:
 https://github.com/GPrathap/trajectory-tracker
@@ -171,4 +135,5 @@ https://github.com/foolwood/SiamMask
 For the full list of  references, check out the paper.
 ## License
 Licensed under an MIT license.
+
 
